@@ -14,6 +14,8 @@
 
 set -e
 
+1>&2 echo "====================="
+
 optionalArguments=""
 optionalArguments1=""
 ng=0
@@ -23,7 +25,8 @@ mk=0
 hp=0
 total_args=0
 num_threads=$(nproc)
-max_segment_size=0
+uid=0
+segment_size=0
 
 args=("$@")
 
@@ -35,9 +38,21 @@ for ((i=0; i < $#; i++)){
 split_args=( $optionalArguments1 )
 total_args=${#split_args[@]}
 
-for ((i=3; i < $#; i++)){
-  optionalArguments="$optionalArguments ${args[$i]}"
+for ((i=2; i < $#; i++)){
+  if [[ "${args[$i]}" == *"--num_threads"* ]]; then
+    i=$(($i+1))
+  elif [[ "${args[$i]}" == *"--uid"* ]]; then
+    i=$(($i+1))
+  elif [[ "${args[$i]}" == *"--segment_size"* ]]; then
+    i=$(($i+1))
+  else
+    optionalArguments="$optionalArguments ${args[$i]}"
+  fi
 }
+
+1>&2 echo "Optional arguments: $optionalArguments"
+
+
 
 for ((i=0; i < $total_args; i++)){
   if [[ "${split_args[$i]}" == *"--nogapped"* ]]; then
@@ -60,7 +75,17 @@ for ((i=0; i < $total_args; i++)){
   if [[ "${split_args[$i]}" == *"--num_threads"* ]]; then
     num_threads=${split_args[$(($i+1))]}
   fi
+
+  if [[ "${split_args[$i]}" == *"--uid"* ]]; then
+    uid=${split_args[$(($i+1))]}
+  fi
+
+  if [[ "${split_args[$i]}" == *"--segment_size"* ]]; then
+    segment_size=${split_args[$(($i+1))]}
+  fi
 }
+
+1>&2 echo "UID path:  $uid"
 
 if [ $hp -eq 1 ]; then
   segalign --help
@@ -88,7 +113,7 @@ else
     (exit 5)
   fi
 
-  OUTPUT_FOLDER=$PWD/output_$RANDOM
+  OUTPUT_FOLDER=$PWD/output_$RANDOM$RANDOM
   mkdir -p $OUTPUT_FOLDER
 
   if [ ! -w $OUTPUT_FOLDER ]; then
@@ -96,15 +121,15 @@ else
     (exit 5)
   fi
 
-  DATA_FOLDER=$OUTPUT_FOLDER/data_$RANDOM/
+  DATA_FOLDER=$OUTPUT_FOLDER/data_$RANDOM$RANDOM/
   mkdir -p $DATA_FOLDER
 
   if [ $ng -eq 0 ]; then
     cd $DATA_FOLDER
     1>&2 echo ""
-    1>&2 echo "Converting fasta files to 2bit format"
-    faToTwoBit $refPath ref.2bit
-    faToTwoBit $queryPath query.2bit
+    1>&2 echo "Making symlink of 2bit files"
+    ln -s ${refPath}.2bit ref.2bit
+    ln -s ${queryPath}.2bit query.2bit
   fi
 
   1>&2 echo ""
@@ -112,32 +137,54 @@ else
 
   pids=""
   FAIL=0
+  last_pid=0
+  nice=19
+  sleep_time="0.2"
+  sleep_time_incr=1
+  max_sleep_incr=60
 
   cd $OUTPUT_FOLDER
+  1>&2 echo "output folder: $OUTPUT_FOLDER"
 
-  max_segment_size=$3
+  autogroup_enabled=$(cat /proc/sys/kernel/sched_autogroup_enabled)
+  1>&2 echo "autogroups enabled: $autogroup_enabled"
+
 
   time {
   count=0
-
-  while IFS= read -r line_; do 
+  while IFS= read -r line_; do
     while IFS= read -r line; do
-      eval "$line" & pids="$pids $!"; 
-      count=$((count+1)); 
-      while [ $count -ge $(nproc) ]; do 
-        count=0; running=""; 
-        for pid in $pids; do 
-          if ps -p $pid > /dev/null; 
-            then count=$((count+1)); 
-            running="$running $pid"; 
-          fi; 
-        done; 
-        pids=$running; 
-      done; 
-    done < <(stdbuf -oL diagonal_partition $max_segment_size $line_)
-  done < <(stdbuf -oL segalign $refPath $queryPath $DATA_FOLDER $optionalArguments )
-    
-    
+      if [ $autogroup_enabled -eq 1 ]; then
+        eval "reallynice $nice $line" & last_pid=$!;
+        #1>&2 echo "echo $nice > /proc/self/autogroup";
+        #echo $nice > /proc/self/autogroup;
+        #1>&2 cat /proc/self/autogroup;
+        #1>&2 echo "nice: $nice, line: $line"
+      else
+        eval "nice -n $nice $line" & last_pid=$!;
+      fi;
+
+      pids="$pids $last_pid";
+      sleep "$sleep_time";
+      count=$(ps -x --format=command | grep '[l]astz' | wc -l);
+      sleep_time_incr=1;
+      while [ $count -ge $num_threads ]; do
+        running="";
+        for pid in $pids; do
+          if ps -p $pid > /dev/null; then
+            running="$running $pid";
+          fi;
+        done;
+        sleep $(((count-num_threads+1)*sleep_time_incr));
+        if [ $sleep_time_incr -lt $max_sleep_incr ]; then
+          sleep_time_incr=$((sleep_time_incr+1));
+        fi;
+        count=$(ps -x --format=command | grep '[l]astz' | wc -l);
+        pids=$running;
+      done;
+    done < <(stdbuf -oL segalign_sort $segment_size $line_ | stdbuf -oL pv -B 128M -C)
+  done < <((stdbuf -oL segalign $refPath $queryPath $DATA_FOLDER $optionalArguments && touch $uid) | stdbuf -oL pv -B 128M -C)  
+  #done < <(stdbuf -oL segalign $refPath $queryPath $DATA_FOLDER $optionalArguments; if [ $? -eq 0 ]; then touch $uid; fi | stdbuf -oL mbuffer -m 128M -s 512 -q -v 0)
   wait $pids || let "FAIL+=1"
   }
 
@@ -156,16 +203,17 @@ else
           (exit 6)
         fi
 
-        for i in *.err; 
-        do 
-          rm $i; 
+        for i in *.err;
+        do
+          rm $i;
         done
       fi
 
       if [ $(ls *.segments | wc -l) -gt 0 ]; then
-        for i in *.segments; 
-        do 
-          rm $i; 
+        du -ba *.segments > segment_sizes.txt
+        for i in *.segments;
+        do
+          rm $i;
         done
       fi
     fi
@@ -176,16 +224,16 @@ else
       > $output_filename
 
       if [ $(ls tmp*.plus.* | wc -l) -gt 0 ]; then
-        for filename in `for i in tmp*.plus.*; do echo $i; done | sort -V`; 
-        do 
-          cat $filename >> $output_filename && rm $filename; 
+        for filename in `for i in tmp*.plus.*; do echo $i; done | sort -V`;
+        do
+          cat $filename >> $output_filename && rm $filename;
         done
       fi
 
       if [ $(ls tmp*.minus.* | wc -l) -gt 0 ]; then
-        for filename in `for i in tmp*.minus.*; do echo $i; done | sort -V`; 
-        do 
-          cat $filename >> $output_filename && rm $filename; 
+        for filename in `for i in tmp*.minus.*; do echo $i; done | sort -V`;
+        do
+          cat $filename >> $output_filename && rm $filename;
         done
       fi
 
@@ -196,21 +244,21 @@ else
     else
 
       if [ $(ls tmp*.plus.* | wc -l) -gt 0 ]; then
-        for filename in `for i in tmp*.plus.*; do echo $i; done | sort -V`; 
-        do 
-          cat $filename && rm $filename; 
+        for filename in `for i in tmp*.plus.*; do echo $i; done | sort -V`;
+        do
+          cat $filename && rm $filename;
         done
       fi
 
       if [ $(ls tmp*.minus.* | wc -l) -gt 0 ]; then
-        for filename in `for i in tmp*.minus.*; do echo $i; done | sort -V`; 
-        do 
-          cat $filename && rm $filename; 
+        for filename in `for i in tmp*.minus.*; do echo $i; done | sort -V`;
+        do
+          cat $filename && rm $filename;
         done
       fi
 
       if [ $mk -eq 1 ]; then
-        echo "# segalign end-of-file" 
+        echo "# segalign end-of-file"
       fi
 
     fi
@@ -220,6 +268,3 @@ else
 
   rm -rf $OUTPUT_FOLDER
 fi
-
-
-
