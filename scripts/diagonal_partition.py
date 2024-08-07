@@ -77,12 +77,7 @@ if __name__ == "__main__":
         
         if len(files) < 2:
             # if not enough segment files for estimation, use MAX_CHUNK_SIZE
-            chunk_size = MAX_CHUNK_SIZE
-        elif len(files) == 2:
-            # try to minimize worst case, at cost having a increased chance of
-            # splitting a small segment file
-            chunk_size = min(sum(files)/len(files), MAX_CHUNK_SIZE)
-        
+            chunk_size = MAX_CHUNK_SIZE        
         else:
             fdict = defaultdict(int)
             for f in files:
