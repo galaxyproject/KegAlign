@@ -1,11 +1,11 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
-'''
+"""
 Split an input genome file into multiple files with size near goal_bp. Individual chromosomes are not split.
 
 Usage example:
 split_input.py --input <input_genome> --out ./blocked_20_chr_hg38 --to_2bit true --goal_bp 200000000 --max_chunks 20
-'''
+"""
 
 import argparse
 import collections
@@ -163,7 +163,6 @@ class FastaFile:
             self.sequences = self.sequences[: split_index - 1]
 
 
-
 def convert_to_2bit(root_dir: str) -> None:
     commands = []
 
@@ -269,7 +268,7 @@ def split_chr(
     return chunk_size_list
 
 
-def parallel_wrapper(pass_list: tuple[FastaFile, str, int, bool, bool]) -> list[int]:
+def parallel_wrapper(pass_list: tuple[str, str, int, bool, bool]) -> list[int]:
     _pass_list = (FastaFile(pass_list[0]), pass_list[1], pass_list[2], pass_list[3])
     return split_chr(*_pass_list)
 
@@ -317,7 +316,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     target_file = args.input
-    #target_fasta = FastaFile(target_file, debug=args.debug)
+    # target_fasta = FastaFile(target_file, debug=args.debug)
 
     target_block_dir = args.out
 
@@ -375,20 +374,20 @@ if __name__ == "__main__":
     if args.debug:
 
         if args.goal_bp:
-            print( 
+            print(
                 print(f"bin_count = {bin_count}, loss={best_bin_loss}"),
                 file=sys.stderr,
                 flush=True,
             )
         else:
-            print( 
+            print(
                 f"DEBUG: bin_count = {bin_count}",
                 file=sys.stderr,
                 flush=True,
             )
 
     # TODO: this is a bit inefficient, since this was already calculated
-    # in parallel_wrapper (if goal_bp provided), but was not written to 
+    # in parallel_wrapper (if goal_bp provided), but was not written to
     # output directory
     target_fasta = FastaFile(target_file, debug=args.debug)
     split_chr(target_fasta, target_block_dir, bin_count)
