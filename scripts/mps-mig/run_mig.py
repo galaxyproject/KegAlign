@@ -19,17 +19,22 @@ class GPU_queue():
     """
     """
     def __init__(self, device_names:list, uid_folder:str, uid_prefix='UID_', max_processes:list=None):
-        self.queue = {}
+        self.queue = {} # dict of lists. Each list is for a GPU or MIG device
+                        # which holds UID values of processes running on
+                        # that device
         for i in device_names:
             self.queue[i] = []
-        self.uid_folder = uid_folder
-        self.submitted_uid = set()
-        self.completed_uid_history = set()
+        self.uid_folder = uid_folder # directory where UID files are written
+        self.submitted_uid = set() # keeps track of each submitted proccess's corresponding UID value
+        self.completed_uid_history = set() # keeps track of processes that successfully completed GPU portions
         self.uid_prefix = uid_prefix
-        self.max_processes = {}
+        self.max_processes = {} # key: GPU device name (str), value: int (number of processes per MIG (or GPU) device)
         if max_processes != None:
             for i in range(len(device_names)):
                 self.max_processes[device_names[i]] = max_processes[i]
+
+    def __len__(self):
+        return sum([len(i) for i in gpu_queue.get_queue().values()])
 
     def submit(self, uid:str, device_name:str):
         self.queue[device_name].append(uid)
@@ -42,6 +47,7 @@ class GPU_queue():
 
     '''
     Removes processes that completed their GPU part but not necessarily CPU (LASTZ) part.
+    Checks files in UID directory
     '''
     def check_completion(self):
         completed_uid = set([f for f in os.listdir(self.uid_folder) if self.uid_prefix in f and os.path.isfile(os.path.join(self.uid_folder, f))])
@@ -84,7 +90,7 @@ Removes complete processes to prevent too many file open errors.
 '''
 class Process_List():
     def __init__(self, max_processes = 256):
-        self.processes = {} #key process.name (UID), value process
+        self.processes = {} #key process.name (UID), value: process
         self.stdout = ""
         self.stderr = ""
         self.max_processes = max_processes
@@ -110,7 +116,9 @@ class Process_List():
         return 'no_err'
 
     '''
-    Check if processes are complete and saves outputs. Returns any process names (UID) that have failed
+    Check if processes are complete and saves outputs to stdout and stderr. 
+    Complete processes are removed from self.processes
+    Returns any process names (UID) that have failed
     '''
     def get_fails_and_check_completion(self):
         process_names = list(self.processes.keys())
@@ -118,7 +126,7 @@ class Process_List():
         mem_fails = []
         for p_name in process_names:
             p = self.processes[p_name]
-            if p.poll() is not None:
+            if p.poll() is not None: # check if process is finished 
                 print("\33[2K", end='') # clear line
                 print(f"-- REMOVING process {p.name}")
                 stdout, stderr = p.communicate() # get outputs. Blocks until process returns
@@ -135,7 +143,10 @@ class Process_List():
         return fails, mem_fails
 
     '''
-    Checks uids in uid_list and returns those that are complete
+    Checks uids in uid_list and returns those whose corresponding procces
+    is finished running.
+    
+    Does not update any class members 
     '''
     def check_uid_completion(self, uid_list):
         complete_uids = []
@@ -193,7 +204,6 @@ class Process_List():
     def print_fails(self):
         print(f"FAILED: {self.fails()}")
 
-
 def run_command(command):
     line_as_bytes = subprocess.check_output(f"{command}", shell=True)
     line = line_as_bytes.decode("ascii")
@@ -205,46 +215,12 @@ def get_nvidia_smi():
 def get_nvidia_smi_L():
     return run_command('nvidia-smi -L')
 
-def get_processes(): # DEPRECATED nvidia-smi very slow to exec.
-    x = get_nvidia_smi().split('Processes:')[1].split('|=======================================================================================|')[1].strip()
-    processes = x.split('\n')[:-1]
-
-    if 'No running processes found' in processes[0]:
-        return []
-
-    process_list = []
-    for line in processes:
-        s = line.split()
-        gpu = s[1]
-        gi_id = s[2]
-        ci_id = s[3]
-        name = s[6]
-        process_list.append([gpu, gi_id, ci_id, name])
-    return process_list
-
-
-def get_processes_v2(use_MPS = False):
-    deviceCount = nvmlDeviceGetCount()
-    process_list = []
-    for i in range(deviceCount):
-        handle = nvmlDeviceGetHandleByIndex(i)
-        if use_MPS:
-            processes = nvmlDeviceGetMPSComputeRunningProcesses_v3(handle)
-        else:
-            processes = nvmlDeviceGetComputeRunningProcesses_v3(handle)
-        for process in processes:
-            process_list.append((i, process))
-    return process_list
-
-
-
 def get_uuids(): # TODO make this use nvml functions
     mig_uuids = re.findall(r'\(UUID: MIG(.*?)\)', get_nvidia_smi_L())
     mig_uuid_list = []
     for id in mig_uuids:
         mig_uuid_list.append(f"MIG"+id)
     return mig_uuid_list
-
 
 def init_mig_dict(used_uuids): # TODO make this use nvml functions
     x = get_nvidia_smi().split('MIG devices:')[1]
@@ -273,59 +249,6 @@ def init_mig_dict(used_uuids): # TODO make this use nvml functions
             mig_dict[(gpu, gi_id, ci_id)] = uuid
     return mig_dict
 
-def get_free_mig(mig_dict): # return mig uuids
-    process_list = get_processes()
-    free_mig_list = list(mig_dict.values())
-
-    for process in process_list:
-        gpu, gi_id, ci_id, name = process
-        mig_uuid = mig_dict.get((gpu, gi_id, ci_id))
-        if mig_uuid != None:
-            free_mig_list.remove(mig_uuid)
-    return free_mig_list
-
-def get_free_mig_v2(mig_dict, no_MIG=False):
-    #print('==========')
-    processes = get_processes_v2()
-    free_mig_list = list(mig_dict.values())
-    #for i, p in processes:
-    #    print(f"gpu:{i}  {p}")
-    for gpu_id, process in processes:
-        if no_MIG:
-            gi_id = 'N/A'
-            ci_id = 'N/A'
-        else:
-            gi_id = process.gpuInstanceId
-            ci_id = process.computeInstanceId
-        mig_uuid = mig_dict.get((str(gpu_id), str(gi_id), str(ci_id)))
-        if mig_uuid != None:
-            #print(f"removing uuid {mig_uuid} with gpu_id:{gpu_id}, gi_id:{gi_id}, ci_id:{ci_id}  {free_mig_list}")
-            try:
-                free_mig_list.remove(mig_uuid)
-            except:
-                pass
-                # TODO why does this happen?
-    return free_mig_list
-
-def get_mig_process_count(mig_dict, no_MIG=False, use_MPS=False): # similar to get_free_mig, but returns a dict with process count for each mig device
-    #print('==========')
-    processes = get_processes_v2(use_MPS)
-    #if use_MPS:
-    #    mig_process_count_dict = dict.fromkeys(mig_dict.values(), -1) # init -1 to ignore nvidia-cuda-mps process
-    #else:
-    mig_process_count_dict = dict.fromkeys(mig_dict.values(), 0)
-
-    for gpu_id, process in processes:
-        if no_MIG:
-            gi_id = 'N/A'
-            ci_id = 'N/A'
-        else:
-            gi_id = process.gpuInstanceId
-            ci_id = process.computeInstanceId
-        mig_uuid = mig_dict.get((str(gpu_id), str(gi_id), str(ci_id)))
-        if mig_uuid != None:
-            mig_process_count_dict[mig_uuid] += 1
-    return mig_process_count_dict
 
 def combine_results(output_dir, output_file, part_pattern='part_*.maf', remove=True):
     try:
@@ -336,7 +259,7 @@ def combine_results(output_dir, output_file, part_pattern='part_*.maf', remove=T
     except:
         print("Could not combine results")
 
-def remove_uids(uid_dir, uid_prefix):
+def remove_uid_files(uid_dir, uid_prefix):
     try:
         run_command(f"rm {os.path.join(uid_dir,uid_prefix)}*")
     except:
@@ -358,29 +281,59 @@ def get_time(timer):
     return str(datetime.datetime.now()-timer).split('.', 1)[0]
 
 if __name__=='__main__':
+    # TODO most variables with 'mig' in the name are misleading. They are used for both MIG and non-MIG GPUs. Need to rename these
     parser = argparse.ArgumentParser()
-    parser.add_argument('MIG')
-    parser.add_argument('--MPS', type=str, default=None)
-    parser.add_argument('--kill_mps', type=bool, default=False)
+    parser.add_argument('MIG', help="Comma separated list of GPU or MIG device names")
+    parser.add_argument('--MPS', type=str, default=None, 
+                        help="Comma separated list of number of processes per GPU/MIG node.")
+    parser.add_argument('--kill_mps', type=bool, default=False, 
+                        help="Shutdown all MPS daemons. Does not run aligmnet. Used for debug purposes or when run_mig script improperly terminated.")
     #parser.add_argument('--skip_mps_init', type=bool, default=False)
-    parser.add_argument('--refresh', type=float, default=0.2)
+    parser.add_argument('--refresh', type=float, default=0.2,
+                        help="Time in seconds to wait before checking for free GPU or MIG devices")
     #parser.add_argument('--usev', type=str, default='')
-    parser.add_argument('--query', type=str, default='/home/mdl/WGA_tests/query_blocked/')
-    parser.add_argument('--target', type=str, default='/home/mdl/WGA_tests/target_blocked/')
-    parser.add_argument('--tmp_dir', type=str, default='/home/mdl/WGA_tests/tmp/')
-    parser.add_argument('--output', type=str, default='/home/mdl/WGA_tests/results/MIG_results.maf')
-    parser.add_argument('--format', type=str, default='maf')
-    parser.add_argument('--mps_pipe_dir', type=str, default='/home/mdl/WGA_tests/tmp/')
-    parser.add_argument('--num_threads', type=int, default=-1)
-    parser.add_argument('--segment_size', type=int, default=0)
-    parser.add_argument('--segalign_cmd', type=str, default='run_segalign_symlink')
-    parser.add_argument('--opt_cmd', type=str, default='')
-    parser.add_argument('--test', type=bool, default=False)
-    parser.add_argument('--keep_partial', type=bool, default=False)
-    parser.add_argument('--only_missing', type=bool, default=False)
-    parser.add_argument('--skip_mps_control', type=bool, default=False)
-
-
+    parser.add_argument('--query', type=str, required=True,
+                        help="Directory containing partitioned input query file.")
+    parser.add_argument('--target', type=str, required=True,
+                        help="Directory containing partitioned input target file.")
+    parser.add_argument('--tmp_dir', type=str, required=True,
+                        help="Directory to store temporary files.")
+    parser.add_argument('--output', type=str, required=True,
+                        help="Output alignment file name.")
+    parser.add_argument('--format', type=str, default='maf-',
+                        help="Output alignment file format. Must be supported by SegAlign, i.e. able to be concatenated.")
+    parser.add_argument('--mps_pipe_dir', type=str, 
+                        help="MPS pipe directory.")
+    parser.add_argument('--num_threads', type=int, default=-1,
+                        help="Number of threads to use for each SegAlign process.")
+    parser.add_argument('--segment_size', type=int, default=0,
+                        help="Maximum segment size output by SegAlign. Segment\
+                        files larger than this parameter are partitioned. \
+                        0 does no partitioning, -1 estimates best partition \
+                        size. See diagonal_partition.py")
+    parser.add_argument('--segalign_cmd', type=str, default='run_segalign_symlink',
+                        help="Command to SegAlign runner script. This is called \
+                        when aligning each pair of query and target files.")
+    parser.add_argument('--opt_cmd', type=str, default='',
+                        help="Additional options to pass to SegAlign runner script.")
+    parser.add_argument('--keep_partial', type=bool, default=False,
+                        help="Keep output files for each pair of alignments \
+                        after combining them. It is recommended to keep these \
+                        files for debugging purposes or if output file format \
+                        does not support concatenation.")
+    parser.add_argument('--only_missing', type=bool, default=False,
+                        help="Only run SegAlign for missing pairs of query \
+                        and target files, if any failed for some reason.")
+    parser.add_argument('--skip_mps_control', type=bool, default=False,
+                        help="Skip starting and stopping MPS daemon. Used for debugging purposes.")
+    parser.add_argument('--start_uid', type=int, default=None,
+                        help="Start alignmet from a specific pair. Used for debugging purposes.")
+    parser.add_argument('--verbose', type=bool, default=False,
+                        help="Print additional information to console.")
+    parser.add_argument('--twobit_ext', type=str, default='.2bit',
+                        help="File extensions of 2bit files in query and target directories.")
+    parser.add_argument('--resubmit_fails', type=bool, default=True,
+                        help="Whether to resubmit failed alignment pairs.")
 
 
     args = parser.parse_args()
@@ -411,44 +364,18 @@ if __name__=='__main__':
     use_MPS = args.MPS != None
     if use_MPS:
         print("USING MPS")
-        num_MPS = [int(x) for x in args.MPS.split(',')] # how many processes per MPS node
+        num_MPS = [int(x) for x in args.MPS.split(',')] # how many processes per MIG node
         max_proc_dict = dict(zip(mig_list, num_MPS))
 
     nvmlInit()
 
-    test = False
-
-
-    if test:
-        print("PROCESSES")
-        print(get_processes())
-        print()
-        print("UUIDS")
-        print(get_uuids())
-        print()
-        print("MIG_DICT")
-        mig_dict = init_mig_dict(mig_list)
-        print(mig_dict)
-        if no_MIG:
-            print('NO_MIG DICT')
-            mig_dict = {}
-            mig_dict['0', 'N/A', 'N/A'] = mig_list[0]
-            print(mig_dict)
-
-        print("FREE MIG v1")
-        print(get_free_mig(mig_dict))
-        print("FREE MIG v2")
-        print(get_free_mig_v2(mig_dict, no_MIG))
-        input('...')
-        while(True):
-            print('enter loop')
-            time.sleep(0.5)
-            print(get_free_mig_v2(mig_dict, no_MIG))
 
     timer = datetime.datetime.now()
-    cpu_per_segalign = 2
-    gpu_per_segalign = 1
-    #total_cpus = 128
+    gpu_per_segalign = 1 # TODO script currently only supports 1 GPU per SegAlign process. Add multiple GPU support if needed
+    # GPU is determined using CUDA_VISIBLE_DEVICES variable when calling segalign script.
+    # NOTE: Multiple MIG devices canNOT be used by the same SegAlign instance due to CUDA
+    # limitations. See https://docs.nvidia.com/datacenter/tesla/mig-user-guide/index.html#cuda-visible-devices
+    
     non_mig_gpu_id = 0 # TODO make this non hardcoded
 
     query_dir = args.query
@@ -465,6 +392,7 @@ if __name__=='__main__':
     segment_command = ''
     if args.segment_size != 0:
         segment_command = f'--segment_size {segment_size}'
+        
 
     mps_timer = datetime.datetime.now()
     
@@ -481,20 +409,23 @@ if __name__=='__main__':
         init_mps(mig_list, mps_pipe_dir)
     print(f"MPS init time: {get_time(mps_timer)}")
 
-    _2bit_extension = '.2bit' #TODO make input parameter
+    _2bit_extension = args.twobit_ext
     query_block_file_names = sorted([file for file in os.listdir(query_dir) if _2bit_extension not in file])
     target_block_file_names = sorted([file for file in os.listdir(target_dir) if _2bit_extension not in file])
 
-    process_list = Process_List()#[]
+    process_list = Process_List()
 
     python_log = ""
     python_log += f"Starting Time: {datetime.datetime.now()}\n"
 
     normal_completion = False # used to check if program stopped due to error or termination
     
-    resub_mem_fails = True
+    resub_mem_fails = args.resubmit_fails
 
-    try: # make sure to run exit functions on exit, even if errors
+    verbose = bool(args.verbose)
+
+    try: # use try block to make sure to run exit functions on exit, even if errors
+        '''
         if no_MIG:
             mig_dict = {}
             mig_dict[str(non_mig_gpu_id), 'N/A', 'N/A'] = mig_list[0]
@@ -502,82 +433,67 @@ if __name__=='__main__':
             mig_dict = init_mig_dict(mig_list)
 
         print(mig_dict)
-
+        '''
         part = 1
         refresh_time = args.refresh
-        if not use_MPS:
-            # TODO this if block is unneccessary, remove
-            free_mig_list = get_free_mig_v2(mig_dict, no_MIG)
-            for q in query_block_file_names:
-                for t in target_block_file_names:
-                    part += 1
-                    #if part >= 10:
-                    #    break
-                    print(f"running part {part}: {q} and {t}")
-                    while(len(free_mig_list) == 0):
-                        time.sleep(refresh_time)
-                        free_mig_list = get_free_mig_v2(mig_dict, no_MIG)
+        
+        # Main purpose of GPU_queue is to keep track of running SegAlign processes on each GPU or MIG device
+        # Since we call a runner script, which calls the SegAlign executable we want to keep track of, using
+        # process id to keep track of SegAlign instances is difficult. Instead we use temporary files (UID files)
+        # to keep track of running processes. This is done by the segalign runner script writing a UID file when
+        # a segalign process is successfully completed.
+        # If the run_mig.py and segalign runner script were to be combined into one script, this process would be
+        # much simpler.
+        gpu_queue = GPU_queue(mig_list, tmp_dir, uid_prefix, num_MPS)
+        print(f"GPU QUEUE: {gpu_queue.queue}")
 
-                    #command = f'CUDA_VISIBLE_DEVICES={free_mig_list[0]} run_segalign {os.path.join(target_dir, t)} {os.path.join(query_dir, q)} --debug --output {os.path.join(output_dir, f"{part}.maf")} --num_gpu {gpu_per_segalign} --num_threads {cpu_per_segalign} --num_lastz_threads {total_cpus}'
-                    # TODO add CPU count parameter for lastz and segalign
-                    command = f'CUDA_VISIBLE_DEVICES={free_mig_list[0]} run_segalign {os.path.join(target_dir, t)} {os.path.join(query_dir, q)} --debug --output={os.path.join(tmp_dir, f"part_{part}.{output_format}")} --num_gpu {gpu_per_segalign}'
+        mig_process_dict = gpu_queue.get_queue()
+        free_mig_list = gpu_queue.get_free_device_list()
 
-                    # run process in non blocking way
-                    process = NamedPopen(command, stdout = subprocess.PIPE, stderr = subprocess.PIPE, text = True, shell = True, name=f"segalign:{free_mig_list[0]}")
-                    print(f"running process with pid={process.pid} and mig_uuid={free_mig_list[0]}. part {part}: {q} and {t}")
-                    process_list.append(process)
-                    free_mig_list.pop(0)
-                    #assert(len(get_processes_v2()) <= len(mig_list)) # TODO why does this fail sometimes? => SegAlign spawns 2 CUDA processes per execution?
-        else: # using MPS
-            gpu_queue = GPU_queue(mig_list, tmp_dir, uid_prefix, num_MPS)
-            print(f"GPU QUEUE: {gpu_queue.queue}")
-            print("USING MPS SUBMISSION V3")
+        max_processes = sum(max_proc_dict.values())
+        print(f'max processes = {max_processes}')
+        print(mig_process_dict)
+        print('=====')
+        pairs = [] # list of tasks
+        for q in query_block_file_names:
+            for t in target_block_file_names:
+                pairs.append((q,t))
+        total_pairs = len(pairs)
+        uid_pair_map = {} # used when resubmitting mem fails. Need to know file pair for given UID
+        while len(pairs) > 0:
+            #print(f"running part {part}: {q} and {t}")
+            entered_while = False # used for printing to console
+            while(len(free_mig_list) == 0):
+                entered_while = True
+                time.sleep(refresh_time)
+                gpu_queue.check_completion() # checks removes processes from gpu_queue whose UID files have been written
 
-            mig_process_dict = gpu_queue.get_queue()
-            free_mig_list = gpu_queue.get_free_device_list()
+                # some processes fail mainly due to lacking GPU, need to deal with these 
+                # TODO prevent failures by checking GPU memory usage
+                running_uids = gpu_queue.get_running_uids()
+                failed_uids = process_list.check_uid_completion(running_uids) # uids that have their corresponding process complete, but not removed (possibly due to errors).
+                                                                                # Note: process removal done by checking if UID file is written
+                if resub_mem_fails:
+                    resub_uids = process_list.check_uid_memfail(failed_uids)
+                    for resub_uid in resub_uids:
+                        print(f"{resub_uid} RESUBMITTED")
+                        python_log += f"{resub_uid} RESUBMITTED\n"
+                        resub_pair = uid_pair_map[resub_uid]
+                        pairs.append(resub_pair)
+                #failed_uids = process_list.get_fails_and_check_completion()
+                if len(failed_uids) > 0:
+                    gpu_queue.remove_uids(failed_uids)
+                    for uid in failed_uids:
+                        python_log += f"FAILED UID {uid}\n"
+                        print(f"FAILED UID {uid}")
 
-            max_processes = sum(max_proc_dict.values())
-            print(f'max processes = {max_processes}')
-            print(mig_process_dict)
-            print('=====')
-            pairs = [] # list of tasks
-            for q in query_block_file_names:
-                for t in target_block_file_names:
-                    pairs.append((q,t))
-            total_pairs = len(pairs)
-            uid_pair_map = {} # used when resubmitting mem fails. Need to know file pair for given UID
-            while len(pairs) > 0:
-                #print(f"running part {part}: {q} and {t}")
-                entered_while = False # used for printing to console
-                while(len(free_mig_list) == 0):
-                    entered_while = True
-                    time.sleep(refresh_time)
-                    gpu_queue.check_completion() # checks removes processes from gpu_queue whose UID files have been written
-
-                    # some processes fail, need to deal with these # TODO prevent failures
-                    running_uids = gpu_queue.get_running_uids()
-                    failed_uids = process_list.check_uid_completion(running_uids) # uids that have their corresponding process complete, but not removed (possibly due to errors).
-                                                                                  # Note: process removal done by checking if UID file is written
-                    if resub_mem_fails:
-                        resub_uids = process_list.check_uid_memfail(failed_uids)
-                        for resub_uid in resub_uids:
-                            print(f"{resub_uid} RESUBMITTED")
-                            python_log += f"{resub_uid} RESUBMITTED\n"
-                            resub_pair = uid_pair_map[resub_uid]
-                            pairs.append(resub_pair)
-                    #failed_uids = process_list.get_fails_and_check_completion()
-                    if len(failed_uids) > 0:
-                        gpu_queue.remove_uids(failed_uids)
-                        for uid in failed_uids:
-                            python_log += f"FAILED UID {uid}\n"
-                            print(f"FAILED UID {uid}")
-
-                    mig_process_dict = gpu_queue.get_queue()
-                    free_mig_list = gpu_queue.get_free_device_list()
-                    #print(f"Free devices: {free_mig_list}, device_queue: {gpu_queue.get_queue()}", end='\r')
-                    #print(f"\33[2KFree devices: {free_mig_list}", end='\r')
+                mig_process_dict = gpu_queue.get_queue()
+                free_mig_list = gpu_queue.get_free_device_list()
+                #print(f"Free devices: {free_mig_list}, device_queue: {gpu_queue.get_queue()}", end='\r')
+                #print(f"\33[2KFree devices: {free_mig_list}", end='\r')
+                if verbose:
                     print('\33[2K', end='') # clear line
-                    
+                
                     # print GPU queue information
                     for enum_i, i in enumerate(gpu_queue.get_queue().values()): # get single MIG slice queue
                         for enum_j,j in enumerate(i): # get
@@ -590,52 +506,82 @@ if __name__=='__main__':
                         else:
                             print(f"|", end='')
                     print(f"\r", end='')
-                if entered_while:
-                    print('')
-                    
-                # get MIG device
-                mig_device, proc_ctr = free_mig_list[0] #TODO choose most remaining free space left device
-                free_mig_list.pop(0)
-                assert(proc_ctr < max_proc_dict[mig_device])
-                while proc_ctr < max_proc_dict[mig_device]:
-                    proc_ctr += 1
-                    if len(pairs) == 0:
-                        break
-                    q,t = pairs[0]
-                    pairs.pop(0)
-                    uid_name = uid_prefix+str(part)
-                    
-                    out = os.path.join(tmp_dir, f"part_{part}.{output_format}")
-                    command = f'CUDA_VISIBLE_DEVICES={mig_device} {args.segalign_cmd} {args.opt_cmd} {os.path.join(target_dir, t)} {os.path.join(query_dir, q)} --debug --output={out} --format={args.format} --num_gpu {gpu_per_segalign} --num_threads {args.num_threads} --uid {os.path.abspath(os.path.join(tmp_dir,uid_name))} {segment_command}'
-                    command = f'CUDA_MPS_PIPE_DIRECTORY={os.path.join(mps_pipe_dir, mig_device)} ' + command
-                    
-                    if bool(args.only_missing):
-                        if os.path.isfile(out):
-                            part += 1
+            if verbose and entered_while:
+                print('')
+                
+            # get MIG device
+            mig_device, proc_ctr = free_mig_list[0] #TODO choose most remaining free space left device
+            free_mig_list.pop(0)
+            assert(proc_ctr < max_proc_dict[mig_device])
+            while proc_ctr < max_proc_dict[mig_device]:
+                proc_ctr += 1
+                if len(pairs) == 0:
+                    break
+                q,t = pairs[0]
+                pairs.pop(0)
+                uid_name = uid_prefix+str(part)
+                
+                out = os.path.join(tmp_dir, f"part_{part}.{output_format}")
+                command = f'CUDA_VISIBLE_DEVICES={mig_device} {args.segalign_cmd} {args.opt_cmd} {os.path.join(target_dir, t)} {os.path.join(query_dir, q)} --debug --output={out} --format={args.format} --num_gpu {gpu_per_segalign} --num_threads {args.num_threads} --uid {os.path.abspath(os.path.join(tmp_dir,uid_name))} {segment_command}'
+                command = f'CUDA_MPS_PIPE_DIRECTORY={os.path.join(mps_pipe_dir, mig_device)} ' + command
+                
+                if bool(args.only_missing):
+                    if os.path.isfile(out):
+                        part += 1
+                        if verbose:
                             print(f"SKIPPING process, part {part}: {t} and {q}. Elapsed Time: {get_time(timer)}") 
-                            python_log += 'SKIPPED: ' + command + '\n'
-                            continue
-                    # run process in non blocking way
-                    process = NamedPopen(command, stdout = subprocess.PIPE, stderr = subprocess.PIPE, text = True, shell = True, name=uid_name)
-                    process_list.append(process)
-                    gpu_queue.submit(uid_name, mig_device)
-                    running = sum([len(i) for i in gpu_queue.get_queue().values()])
-                    est_runtime = str((datetime.datetime.now()-timer)*(total_pairs/ max(total_pairs-len(pairs)-running, 1)  )).split('.', 1)[0]
+                        python_log += 'SKIPPED: ' + command + '\n'
+                        continue
+                    if args.start_uid and part < int(args.start_uid):
+                        if verbose:
+                            print(f"SKIPPING process, part {part}: {t} and {q}. Elapsed Time: {get_time(timer)}") 
+                        python_log += 'SKIPPED: ' + command + '\n'
+                        part += 1
+                        continue
+                # run process in non blocking way
+                process = NamedPopen(command, stdout = subprocess.PIPE, stderr = subprocess.PIPE, text = True, shell = True, name=uid_name)
+                process_list.append(process)
+                gpu_queue.submit(uid_name, mig_device)
+                running = len(gpu_queue) #sum([len(i) for i in gpu_queue.get_queue().values()])
+                est_runtime = str((datetime.datetime.now()-timer)*(total_pairs/ max(total_pairs-len(pairs)-running, 1)  )).split('.', 1)[0]
+                if verbose:
                     print(f"running process with pid={process.pid}, uid={uid_name} and mig_uuid={mig_device}. part {part} /{total_pairs}: {t} and {q}. Elapsed Time: {get_time(timer)}, estimated runtime: {est_runtime} [len(pairs) {len(pairs)}, running {running}]")
                     print(command)
-                    #process_list.append(process)
-                    mig_process_dict = gpu_queue.get_queue()
-                    uid_pair_map[uid_name] = (q,t)
-                    part += 1
-                    python_log += command + '\n'
+                #process_list.append(process)
+                mig_process_dict = gpu_queue.get_queue()
+                uid_pair_map[uid_name] = (q,t)
+                part += 1
+                python_log += command + '\n'
 
-            # wait for all processes to complete
-            output_stdout, output_stderr = process_list.get_output() #TODO waits here
-            # TODO make sure that number of part files are expected
-            print()
-            print(f"Finished GPU section. time {get_time(timer)}")
-            python_log += f"Finished GPU section. time {get_time(timer)}\n"
+        # wait for GPU sections to complete by checking uid files
+        while len(gpu_queue) > 0:
+            gpu_queue.check_completion() # update gpu queue by checking for new uid files
+            
+            # check processes that failed and did not make a uid file
+            running_uids = gpu_queue.get_running_uids()
+            # if processes corresponding to running uids have 
+            # completed without making uid file then these must have
+            # failed for some reason
+            failed_uids = process_list.check_uid_completion(running_uids) 
+            if len(failed_uids) > 0:
+                gpu_queue.remove_uids(failed_uids)
+                for uid in failed_uids:
+                    python_log += f"FAILED UID {uid}\n"
+                    print(f"FAILED UID {uid}")
+            # Resubmission of failed SegAlign processes can be done 
+            # with the parameter --only_missing
+            # TODO add support resubmission for failed UIDs after 
+            # all pairs have been submitted
+        
+        print()
+        print(f"Finished GPU section. time {get_time(timer)}")
+        python_log += f"Finished GPU section. time {get_time(timer)}\n"
+        if use_MPS and not bool(int(args.skip_mps_control)):
+            destroy_mps(mig_list, mps_pipe_dir)
 
+        # wait for all processes (LASTZ and output concatenation parts) to complete
+        output_stdout, output_stderr = process_list.get_output()
+            
 
         # check if missing parts
         output_file_list = [i for i in os.listdir(tmp_dir) if i.startswith('part_') and i.endswith(f'.{output_format}')] 
@@ -656,6 +602,8 @@ if __name__=='__main__':
 
         if not normal_completion:
             output_stdout, output_stderr = process_list.get_output(terminate=True)
+            if use_MPS and not bool(int(args.skip_mps_control)):
+                destroy_mps(mig_list, mps_pipe_dir)
         stdout_log_file = process_list.stdout
         stderr_log_file = process_list.stderr
         # log outputs to tmp directory
@@ -687,8 +635,6 @@ if __name__=='__main__':
         #print(output_stdout)
         
         if not bool(not bool(args.keep_partial)):
-            remove_uids(tmp_dir, uid_prefix)
-        if use_MPS and not bool(int(args.skip_mps_control)):
-            destroy_mps(mig_list, mps_pipe_dir)
+            remove_uid_files(tmp_dir, uid_prefix)
 
         nvmlShutdown()
