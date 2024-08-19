@@ -22,7 +22,7 @@ Precise genome aligner efficiently leveraging GPUs.
 
 - Cleaned up build files and addressed compiler warnings
 - Updated to compile with TBB (Threading Building Blocks) [version 2020.2](https://github.com/oneapi-src/oneTBB/releases/tag/v2020.2)
-- Fixed the --scoring option. It can now read and use the substitution matrix from a LASTZ [Scoring File](https://htmlpreview.github.io/?https://github.com/lastz/lastz/blob/master/docs/index.html#fmt_scoring)
+- Fixed the --scoring option. It can now read and use the substitution matrix from a LASTZ [Scoring File](https://lastz.github.io/lastz/#fmt_scoring)
 - Added --num_threads option to limit the number of threads used
 
 ## <a name="installation"></a> Installation
