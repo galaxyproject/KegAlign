@@ -18,6 +18,13 @@ This is a [@galaxyproject](https://github.com/galaxyproject)'s modified fork of 
 
 Precise genome aligner efficiently leveraging GPUs.
 
+### <a name="changes"></a> Changes from the original implementation
+
+- Cleaned up build files and addressed compiler warnings
+- Updated to compile with TBB (Threading Building Blocks) [version 2020.2](https://github.com/oneapi-src/oneTBB/releases/tag/v2020.2)
+- Fixed the --scoring option. It can now read and use the substitution matrix from a LASTZ [Scoring File](https://lastz.github.io/lastz/#fmt_scoring)
+- Added --num_threads option to limit the number of threads used
+
 ## <a name="installation"></a> Installation
 
 For standalone installation use Conda: `conda install conda-forge::segalign`
