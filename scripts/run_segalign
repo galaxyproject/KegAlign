@@ -23,7 +23,8 @@ mk=0
 hp=0
 total_args=0
 num_threads=$(nproc)
-max_segment_size=0
+segment_size=0
+is_sam=0
 
 args=("$@")
 
@@ -35,9 +36,18 @@ for ((i=0; i < $#; i++)){
 split_args=( $optionalArguments1 )
 total_args=${#split_args[@]}
 
-for ((i=3; i < $#; i++)){
-  optionalArguments="$optionalArguments ${args[$i]}"
+for ((i=2; i < $#; i++)){
+  if [[ "${args[$i]}" == *"--num_threads"* ]]; then
+    i=$(($i+1))
+  elif [[ "${args[$i]}" == *"--segment_size"* ]]; then
+    i=$(($i+1))
+  else
+    optionalArguments="$optionalArguments ${args[$i]}"
+  fi
 }
+
+1>&2 echo "Optional arguments: $optionalArguments"
+
 
 for ((i=0; i < $total_args; i++)){
   if [[ "${split_args[$i]}" == *"--nogapped"* ]]; then
@@ -57,8 +67,18 @@ for ((i=0; i < $total_args; i++)){
     hp=1
   fi
 
+  if [[ "${split_args[$i]}" == *"--format"* ]]; then
+    if [[ "${split_args[$(($i+1))]}" == "sam"* ]]; then
+      is_sam=1
+    fi
+  fi
+
   if [[ "${split_args[$i]}" == *"--num_threads"* ]]; then
     num_threads=${split_args[$(($i+1))]}
+  fi
+
+  if [[ "${split_args[$i]}" == *"--segment_size"* ]]; then
+    segment_size=${split_args[$(($i+1))]}
   fi
 }
 
@@ -115,7 +135,6 @@ else
 
   cd $OUTPUT_FOLDER
 
-  max_segment_size=$3
 
   time {
   count=0
@@ -124,7 +143,7 @@ else
     while IFS= read -r line; do
       eval "$line" & pids="$pids $!"; 
       count=$((count+1)); 
-      while [ $count -ge $(nproc) ]; do 
+      while [ $count -ge $num_threads ]; do 
         count=0; running=""; 
         for pid in $pids; do 
           if ps -p $pid > /dev/null; 
@@ -134,8 +153,8 @@ else
         done; 
         pids=$running; 
       done; 
-    done < <(stdbuf -oL diagonal_partition $max_segment_size $line_)
-  done < <(stdbuf -oL segalign $refPath $queryPath $DATA_FOLDER $optionalArguments )
+    done < <(stdbuf -oL segalign_sort $segment_size $line_ | stdbuf -oL mbuffer -m 128M -s 512 -q -v 0)
+  done < <(stdbuf -oL segalign $refPath $queryPath $DATA_FOLDER $optionalArguments | stdbuf -oL mbuffer -m 128M -s 512 -q -v 0)
     
     
   wait $pids || let "FAIL+=1"
@@ -163,6 +182,7 @@ else
       fi
 
       if [ $(ls *.segments | wc -l) -gt 0 ]; then
+        du -ba *.segments > segment_sizes.txt
         for i in *.segments; 
         do 
           rm $i; 
@@ -175,20 +195,24 @@ else
 
       > $output_filename
 
-      if [ $(ls tmp*.plus.* | wc -l) -gt 0 ]; then
-        for filename in `for i in tmp*.plus.*; do echo $i; done | sort -V`; 
-        do 
-          cat $filename >> $output_filename && rm $filename; 
-        done
-      fi
+      if [ $is_sam -eq 1 ]; then
+        ulimit -Sn $(( $(ls *.sam* | wc -l) * 2 ))
+        samtools merge --no-PG -f -@$num_threads $output_filename *.sam* 
 
-      if [ $(ls tmp*.minus.* | wc -l) -gt 0 ]; then
-        for filename in `for i in tmp*.minus.*; do echo $i; done | sort -V`; 
-        do 
-          cat $filename >> $output_filename && rm $filename; 
-        done
+      else
+        if [ $(ls tmp*.plus.* | wc -l) -gt 0 ]; then
+          for filename in `for i in tmp*.plus.*; do echo $i; done | sort -V`; 
+          do 
+            cat $filename >> $output_filename && rm $filename; 
+          done
+        fi
+        if [ $(ls tmp*.minus.* | wc -l) -gt 0 ]; then
+          for filename in `for i in tmp*.minus.*; do echo $i; done | sort -V`; 
+          do 
+            cat $filename >> $output_filename && rm $filename; 
+          done
+        fi
       fi
-
       if [ $mk -eq 1 ]; then
         echo "# segalign end-of-file" >> $output_filename
       fi
