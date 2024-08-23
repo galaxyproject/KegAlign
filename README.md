@@ -12,11 +12,19 @@ This is a [@galaxyproject](https://github.com/galaxyproject)'s modified fork of 
 
 - [Overview](#overview)
 - [Installation](#installation)
+- [Usage](#usage)
+  - [Alignment](#alignment)
+  - [Scoring Options](#scoring)
+  - [Output Options](#output)
 - [Citing SegAlign](#cite_segalign)
 
 ## <a name="overview"></a> Overview
 
 Precise genome aligner efficiently leveraging GPUs.
+
+### <a name="what"></a> What it does
+
+SegAlign processes **Target** and **Query** sequences to identify highly similar regions where gapped extension will be performed to create actual alignments. 
 
 ### <a name="changes"></a> Changes from the original implementation
 
@@ -26,6 +34,66 @@ Precise genome aligner efficiently leveraging GPUs.
 - Added --num_threads option to limit the number of threads used
 - Added --segment_size option to limit maximum number of HSPs per segment file for CPU load balancing.
 - Added optional runner script using MIG and/or MPS for better GPU utilization.
+
+## <a name="usage"></a> Usage
+
+### <a name="alignment"></a>Alignment
+
+#### Running a Sample Alignment
+```
+cd $PROJECT_DIR
+mkdir test
+cd test
+wget https://usegalaxy.org/api/datasets/f9cad7b01a47213501e23cde09bc3eb2/display?to_ext=fasta 
+wget https://usegalaxy.org/api/datasets/f9cad7b01a4721352af44e7304057a1c/display?to_ext=fasta 
+run_segalign ce11.fa cb4.fa --output=ce11.cb4.maf --num_gpus 1 --num_threads 32 --segment_size -1
+```
+* For a list of options run
+```
+run_segalign --help
+```
+#### Running with MIG/MPS 
+GPU utilization can be increased by using MIG and/or MPS, leading up to 20% faster alignments.
+* Preparing inputs
+```
+wget https://usegalaxy.org/api/datasets/f9cad7b01a47213501e23cde09bc3eb2/display?to_ext=fasta 
+wget https://usegalaxy.org/api/datasets/f9cad7b01a4721352af44e7304057a1c/display?to_ext=fasta
+mkdir query_split
+mkdir target_split
+split_input.py --input apple.fasta --out ./query_split --to_2bit true --goal_bp 20000000
+split_input.py --input orange.fasta --out ./target_split --to_2bit true --goal_bp 20000000
+mkdir tmp
+```
+* Select GPU UUIDs to run on using
+```
+nvidia-smi -L
+```
+* run on two GPUs with 4 MPS processes per GPU (replace [GPU-UUID#] with outputs from above command)
+```
+run_mig.py [GPU-UUID1],[GPU-UUID2] --MPS 4 --target ./target_split --query ./query_split  --tmp_dir ./tmp/ --mps_pipe_dir ./tmp/ --output ./apples_oranges.maf --num_threads 64
+```
+
+
+### <a name="scoring"></a>Scoring Options
+
+By default the HOXD70 substitution scores are used (from `Chiaromonte et al. 2002 <https://www.ncbi.nlm.nih.gov/pubmed/11928468>`_)::
+
+    bad_score          = X:-1000  # used for sub['X'][*] and sub[*]['X']
+    fill_score         = -100     # used when sub[*][*] is not defined
+    gap_open_penalty   =  400
+    gap_extend_penalty =   30
+
+         A     C     G     T
+    A   91  -114   -31  -123
+    C -114   100  -125   -31
+    G  -31  -125   100  -114
+    T -123   -31  -114    91
+
+Matrix can be supplied as an input to **--scoring** parameter. Substitution matrix can be inferred from your data using another LASTZ-based tool (LASTZ_D: Infer substitution scores).
+
+### <a name="output"></a>Output Options
+
+The default output is a MAF alignment file. Other formats can be selected with the *--format* parameter.  See LASTZ manual <https://lastz.github.io/lastz/#formats>`_ for description of possible formats.
 
 ## <a name="installation"></a> Installation
 
