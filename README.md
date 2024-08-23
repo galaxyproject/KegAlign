@@ -46,7 +46,7 @@ mkdir test
 cd test
 wget https://usegalaxy.org/api/datasets/f9cad7b01a47213501e23cde09bc3eb2/display?to_ext=fasta 
 wget https://usegalaxy.org/api/datasets/f9cad7b01a4721352af44e7304057a1c/display?to_ext=fasta 
-run_segalign ce11.fa cb4.fa --output=ce11.cb4.maf --num_gpus 1 --num_threads 32 --segment_size -1
+run_segalign apple.fa orange.fa --output=apple_orange.maf --num_gpus 1 --num_threads 32 --segment_size -1
 ```
 * For a list of options run
 ```
