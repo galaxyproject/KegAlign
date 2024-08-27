@@ -11,6 +11,7 @@ This is a [@galaxyproject](https://github.com/galaxyproject)'s modified fork of 
 ## Table of Contents
 
 - [Overview](#overview)
+- [Dependencies](#dependencies)
 - [Installation](#installation)
 - [Usage](#usage)
   - [Alignment](#alignment)
@@ -21,6 +22,15 @@ This is a [@galaxyproject](https://github.com/galaxyproject)'s modified fork of 
 ## <a name="overview"></a> Overview
 
 Precise genome aligner efficiently leveraging GPUs.
+
+## <a name="dependencies"></a> Dependencies
+The following dependencies are required by SegAlign:
+
+  * [CMake](https://cmake.org/) >= 3.8
+  * oneAPI Threading Building Blocks ([oneTBB](https://oneapi-src.github.io/oneTBB/)) [2020.2](https://github.com/oneapi-src/oneTBB/releases/tag/v2020.2)
+  * [Boost C++ Libraries](https://www.boost.org/) >= 1.70
+  * [LASTZ](https://github.com/lastz/lastz) 1.04.22
+  * faToTwoBit (from [UCSC Genome Browser source](https://github.com/ucscGenomeBrowser/kent))
 
 ### <a name="changes"></a> Changes from the original implementation
 
