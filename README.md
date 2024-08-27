@@ -4,7 +4,7 @@
 [![License][license-badge]][license-link]
 [![Published in SC20](https://img.shields.io/badge/published%20in-SC20-blue.svg)](https://doi.ieeecomputersociety.org/10.1109/SC41405.2020.00043)
 
-<img src="logo.png" width="300">
+<img src="kegalign_logo.webp" width="300">
 
 This is a [@galaxyproject](https://github.com/galaxyproject)'s modified fork of the original [SegAlign](https://github.com/gsneha26/SegAlign). 
 
