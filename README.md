@@ -58,7 +58,7 @@ Try the tools at usegalaxy.org: [segalign](https://usegalaxy.org/root?tool_id=to
 
 ### <a name="scoring"></a>Scoring Options
 
-By default the HOXD70 substitution scores are used (from `Chiaromonte et al. 2002 <https://www.ncbi.nlm.nih.gov/pubmed/11928468>`_)::
+By default the HOXD70 substitution scores are used (from [Chiaromonte et al. 2002](https://doi.org/10.1142/9789812799623_0012))::
 
     bad_score          = X:-1000  # used for sub['X'][*] and sub[*]['X']
     fill_score         = -100     # used when sub[*][*] is not defined
@@ -75,7 +75,7 @@ Matrix can be supplied as an input to **--scoring** parameter. Substitution matr
 
 ### <a name="output"></a>Output Options
 
-The default output is a MAF alignment file. Other formats can be selected with the *--format* parameter.  See LASTZ manual <https://lastz.github.io/lastz/#formats>`_ for description of possible formats.
+The default output is a MAF alignment file. Other formats can be selected with the *--format* parameter.  See [LASTZ manual](https://lastz.github.io/lastz/#formats) for description of possible formats.
 
 ## <a name="cite_segalign"></a> Citing SegAlign
 
