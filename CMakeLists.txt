@@ -1,7 +1,8 @@
 cmake_minimum_required (VERSION 3.8)
-cmake_policy(SET CMP0104 NEW)
-cmake_policy(SET CMP0128 NEW)
-cmake_policy(SET CMP0146 NEW)
+cmake_policy(SET CMP0104 NEW)   # CMake 3.18
+cmake_policy(SET CMP0128 NEW)   # CMake 3.22
+cmake_policy(SET CMP0146 NEW)   # CMake 3.27
+cmake_policy(SET CMP0167 NEW)   # CMake 3.30
 
 execute_process(COMMAND bash "-c" "${CMAKE_SOURCE_DIR}/scripts/get-cuda-arches.bash" OUTPUT_VARIABLE SEGALIGN_CUDA_ARCHITECTURES)
 set(CMAKE_CUDA_ARCHITECTURES "${SEGALIGN_CUDA_ARCHITECTURES}")
