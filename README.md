@@ -58,7 +58,7 @@ Try the tools at usegalaxy.org: [segalign](https://usegalaxy.org/root?tool_id=to
 
 ### <a name="scoring"></a>Scoring Options
 
-By default the HOXD70 substitution scores are used (from [Chiaromonte et al. 2002](https://doi.org/10.1142/9789812799623_0012))::
+By default the HOXD70 substitution scores are used (from [Chiaromonte et al. 2002](https://doi.org/10.1142/9789812799623_0012))
 
     bad_score          = X:-1000  # used for sub['X'][*] and sub[*]['X']
     fill_score         = -100     # used when sub[*][*] is not defined
