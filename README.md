@@ -36,9 +36,9 @@ The following dependencies are required by SegAlign:
 
 - Cleaned up build files and addressed compiler warnings
 - Updated to compile with TBB (Threading Building Blocks) [version 2020.2](https://github.com/oneapi-src/oneTBB/releases/tag/v2020.2)
-- Fixed the --scoring option. It can now read and use the substitution matrix from a LASTZ [Scoring File](https://lastz.github.io/lastz/#fmt_scoring)
-- Added --num_threads option to limit the number of threads used
-- Added --segment_size option to limit maximum number of HSPs per segment file for CPU load balancing
+- Fixed the **--scoring** option. It can now read and use the substitution matrix from a LASTZ [Scoring File](https://lastz.github.io/lastz/#fmt_scoring)
+- Added **--num_threads** option to limit the number of threads used
+- Added **--segment_size** option to limit maximum number of HSPs per segment file for CPU load balancing
 - Added optional runner script using MIG and/or MPS for better GPU utilization
 
 ## <a name="installation"></a> Installation
@@ -75,7 +75,7 @@ Matrix can be supplied as an input to **--scoring** parameter. Substitution matr
 
 ### <a name="output"></a>Output Options
 
-The default output is a MAF alignment file. Other formats can be selected with the *--format* parameter.  See [LASTZ manual](https://lastz.github.io/lastz/#formats) for description of possible formats.
+The default output is a MAF alignment file. Other formats can be selected with the **--format** parameter.  See [LASTZ manual](https://lastz.github.io/lastz/#formats) for description of possible formats.
 
 ## <a name="cite_segalign"></a> Citing SegAlign
 
