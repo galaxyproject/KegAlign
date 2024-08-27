@@ -58,8 +58,24 @@ Try the tools at usegalaxy.org: [segalign](https://usegalaxy.org/root?tool_id=to
 
 ### <a name="scoring"></a>Scoring Options
 
+By default the HOXD70 substitution scores are used (from `Chiaromonte et al. 2002 <https://www.ncbi.nlm.nih.gov/pubmed/11928468>`_)::
+
+    bad_score          = X:-1000  # used for sub['X'][*] and sub[*]['X']
+    fill_score         = -100     # used when sub[*][*] is not defined
+    gap_open_penalty   =  400
+    gap_extend_penalty =   30
+
+         A     C     G     T
+    A   91  -114   -31  -123
+    C -114   100  -125   -31
+    G  -31  -125   100  -114
+    T -123   -31  -114    91
+
+Matrix can be supplied as an input to **--scoring** parameter. Substitution matrix can be inferred from your data using another LASTZ-based tool (LASTZ_D: Infer substitution scores).
+
 ### <a name="output"></a>Output Options
 
+The default output is a MAF alignment file. Other formats can be selected with the *--format* parameter.  See LASTZ manual <https://lastz.github.io/lastz/#formats>`_ for description of possible formats.
 
 ## <a name="cite_segalign"></a> Citing SegAlign
 
