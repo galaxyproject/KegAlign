@@ -56,7 +56,7 @@ void interval_printer_body::operator()(printer_input input, printer_node::output
         }
 
         if(cfg.markend)
-            fprintf(intervalFile, "# segalign_repeat_masker end-of-file\n");
+            fprintf(intervalFile, "# kegalign_repeat_masker end-of-file\n");
 
         fclose(intervalFile);
     }

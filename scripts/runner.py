@@ -22,17 +22,17 @@ RUSAGE_ATTRS: typing.Final = ["ru_utime", "ru_stime", "ru_maxrss", "ru_minflt", 
 class LastzCommands:
     def __init__(self) -> None:
         self.commands: dict[str, LastzCommand] = {}
-        self.segalign_segments: SegAlignSegments = SegAlignSegments()
+        self.kegalign_segments: KegAlignSegments = KegAlignSegments()
 
     def add(self, line: str) -> None:
         if line not in self.commands:
             self.commands[line] = LastzCommand(line)
 
         command = self.commands[line]
-        self.segalign_segments.add(command.segments_filename)
+        self.kegalign_segments.add(command.segments_filename)
 
-    def segments(self) -> typing.Iterator["SegAlignSegment"]:
-        for segment in self.segalign_segments:
+    def segments(self) -> typing.Iterator["KegAlignSegment"]:
+        for segment in self.kegalign_segments:
             yield segment
 
 
@@ -125,23 +125,23 @@ class LastzCommand:
         self.error_filename = f"{base_filename}.err"
 
 
-class SegAlignSegments:
+class KegAlignSegments:
     def __init__(self) -> None:
-        self.segments: dict[str, SegAlignSegment] = {}
+        self.segments: dict[str, KegAlignSegment] = {}
 
     def add(self, filename: str) -> None:
         if filename not in self.segments:
-            self.segments[filename] = SegAlignSegment(filename)
+            self.segments[filename] = KegAlignSegment(filename)
 
-    def __iter__(self) -> "SegAlignSegments":
+    def __iter__(self) -> "KegAlignSegments":
         return self
 
-    def __next__(self) -> typing.Generator["SegAlignSegment", None, None]:
+    def __next__(self) -> typing.Generator["KegAlignSegment", None, None]:
         for segment in sorted(self.segments.values()):
             yield segment
 
 
-class SegAlignSegment:
+class KegAlignSegment:
     def __init__(self, filename: str):
         self.filename = filename
         self.tmp: int = 0
@@ -173,7 +173,7 @@ class SegAlignSegment:
         else:
             self.split = int(split)
 
-    def __lt__(self, other: "SegAlignSegment") -> bool:
+    def __lt__(self, other: "KegAlignSegment") -> bool:
         for attr in ['strand', 'tmp', 'block', 'r', 'split']:
             self_value = getattr(self, attr)
             other_value = getattr(other, attr)
@@ -186,7 +186,7 @@ class SegAlignSegment:
 
 
 def main() -> None:
-    args, segalign_args = parse_args()
+    args, kegalign_args = parse_args()
     lastz_commands = LastzCommands()
 
     if args.diagonal_partition:
@@ -195,17 +195,17 @@ def main() -> None:
         num_diagonal_partitioners = 0
 
     with multiprocessing.Manager() as manager:
-        segalign_q: queue.Queue[str] = manager.Queue()
-        skip_segalign = run_segalign(args, num_diagonal_partitioners, segalign_args, segalign_q, lastz_commands)
+        kegalign_q: queue.Queue[str] = manager.Queue()
+        skip_kegalign = run_kegalign(args, num_diagonal_partitioners, kegalign_args, kegalign_q, lastz_commands)
 
         if num_diagonal_partitioners > 0:
-            diagonal_partition_q = segalign_q
-            segalign_q = manager.Queue()
-            run_diagonal_partitioners(args, num_diagonal_partitioners, diagonal_partition_q, segalign_q)
+            diagonal_partition_q = kegalign_q
+            kegalign_q = manager.Queue()
+            run_diagonal_partitioners(args, num_diagonal_partitioners, diagonal_partition_q, kegalign_q)
 
-        segalign_q.put(SENTINEL_VALUE)
-        output_q = segalign_q
-        segalign_q = manager.Queue()
+        kegalign_q.put(SENTINEL_VALUE)
+        output_q = kegalign_q
+        kegalign_q = manager.Queue()
 
         output_filename = "lastz-commands.txt"
         if args.output_type == "commands":
@@ -219,16 +219,16 @@ def main() -> None:
                     break
 
                 # messy, fix this
-                if skip_segalign:
+                if skip_kegalign:
                     lastz_commands.add(line)
 
                 if args.output_type != "commands":
-                    segalign_q.put(line)
+                    kegalign_q.put(line)
 
                 print(line, file=f)
 
         if args.output_type == "output":
-            run_lastz(args, segalign_q, lastz_commands)
+            run_lastz(args, kegalign_q, lastz_commands)
 
             with open(args.output_file, 'w') as of:
                 print("##maf version=1", file=of)
@@ -379,16 +379,16 @@ def estimate_chunk_size(args: argparse.Namespace) -> int:
     return chunk_size
 
 
-def run_segalign(args: argparse.Namespace, num_sentinel: int, segalign_args: list[str], segalign_q: queue.Queue[str], commands: LastzCommands) -> bool:
-    skip_segalign: bool = False
+def run_kegalign(args: argparse.Namespace, num_sentinel: int, kegalign_args: list[str], kegalign_q: queue.Queue[str], commands: LastzCommands) -> bool:
+    skip_kegalign: bool = False
 
     # use the currently existing output file if it exists
     if args.debug:
-        skip_segalign = load_segalign_output("lastz-commands.txt", segalign_q)
+        skip_kegalign = load_kegalign_output("lastz-commands.txt", kegalign_q)
 
-    if not skip_segalign:
-        run_args = ["segalign"]
-        run_args.extend(segalign_args)
+    if not skip_kegalign:
+        run_args = ["kegalign"]
+        run_args.extend(kegalign_args)
         run_args.append("--num_threads")
         run_args.append(str(args.num_cpu))
         run_args.append("work/")
@@ -401,30 +401,30 @@ def run_segalign(args: argparse.Namespace, num_sentinel: int, segalign_args: lis
 
         for line in process.stdout.splitlines():
             commands.add(line)
-            segalign_q.put(line)
+            kegalign_q.put(line)
 
         if len(process.stderr) != 0:
             for line in process.stderr.splitlines():
                 print(line, file=sys.stderr, flush=True)
 
         if process.returncode != 0:
-            sys.exit(f"Error: segalign exited with returncode {process.returncode}")
+            sys.exit(f"Error: kegalign exited with returncode {process.returncode}")
 
         if args.debug:
             ns: int = time.monotonic_ns() - beg
             r_end = resource.getrusage(resource.RUSAGE_CHILDREN)
-            print(f"segalign clock time: {ns} ns", file=sys.stderr, flush=True)
+            print(f"kegalign clock time: {ns} ns", file=sys.stderr, flush=True)
             for rusage_attr in RUSAGE_ATTRS:
                 value = getattr(r_end, rusage_attr) - getattr(r_beg, rusage_attr)
-                print(f"  segalign {rusage_attr}: {value}", flush=True)
+                print(f"  kegalign {rusage_attr}: {value}", flush=True)
 
     for _ in range(num_sentinel):
-        segalign_q.put(SENTINEL_VALUE)
+        kegalign_q.put(SENTINEL_VALUE)
 
-    return skip_segalign
+    return skip_kegalign
 
 
-def load_segalign_output(filename: str, segalign_q: queue.Queue[str]) -> bool:
+def load_kegalign_output(filename: str, kegalign_q: queue.Queue[str]) -> bool:
     load_success = False
 
     r_beg = resource.getrusage(resource.RUSAGE_SELF)
@@ -434,7 +434,7 @@ def load_segalign_output(filename: str, segalign_q: queue.Queue[str]) -> bool:
         with open(filename) as f:
             for line in f:
                 line = line.rstrip("\n")
-                segalign_q.put(line)
+                kegalign_q.put(line)
         load_success = True
     except FileNotFoundError:
         pass
@@ -467,7 +467,7 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         parser.print_help()
         sys.exit(0)
 
-    args, segalign_args = parser.parse_known_args(sys.argv[1:])
+    args, kegalign_args = parser.parse_known_args(sys.argv[1:])
 
     cpus_available = len(os.sched_getaffinity(0))
     if args.num_cpu == -1:
@@ -476,18 +476,18 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         sys.exit(f"Error: additional {args.num_cpu - cpus_available} CPUs")
 
     if args.nogapped:
-        segalign_args.append("--nogapped")
+        kegalign_args.append("--nogapped")
 
     if args.markend:
-        segalign_args.append("--markend")
+        kegalign_args.append("--markend")
 
     if args.num_gpu != -1:
-        segalign_args.extend(["--num_gpu", f"{args.num_gpu}"])
+        kegalign_args.extend(["--num_gpu", f"{args.num_gpu}"])
 
     if args.debug:
-        segalign_args.append("--debug")
+        kegalign_args.append("--debug")
 
-    return args, segalign_args
+    return args, kegalign_args
 
 
 if __name__ == "__main__":

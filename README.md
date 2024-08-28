@@ -3,7 +3,7 @@
 
 [![License][license-badge]][license-link]
 [![Published in SC20](https://img.shields.io/badge/published%20in-SC20-blue.svg)](https://doi.ieeecomputersociety.org/10.1109/SC41405.2020.00043)
-[![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](http://bioconda.github.io/recipes/segalign-full/README.html)
+[![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](http://bioconda.github.io/recipes/kegalign-full/README.html)
 
 <img src="kegalign_logo.webp" width="300">
 
@@ -18,7 +18,7 @@ This is a [@galaxyproject](https://github.com/galaxyproject)'s modified fork of 
   - [Alignment](#alignment)
   - [Scoring Options](#scoring)
   - [Output Options](#output)
-- [Citing SegAlign](#cite_segalign)
+- [Citing KegAlign](#cite_kegalign)
 
 ## <a name="overview"></a> Overview
 
@@ -35,10 +35,10 @@ Precise genome aligner efficiently leveraging GPUs.
 
 ## <a name="installation"></a> Installation
 
-For standalone installation use Conda: `conda install conda-forge::segalign`
+For standalone installation use Conda: `conda install conda-forge::kegalign`
 
-For installation in Galaxy we currently use the wrappers `richard-burhans:segalign` and `richard-burhans:batched_lastz` from the [Main Tool Shed](https://toolshed.g2.bx.psu.edu/).
-Try the tools at usegalaxy.org: [segalign](https://usegalaxy.org/root?tool_id=toolshed.g2.bx.psu.edu/repos/richard-burhans/segalign/segalign/), [batched_lastz](https://usegalaxy.org/root?tool_id=toolshed.g2.bx.psu.edu/repos/richard-burhans/batched_lastz/batched_lastz/)
+For installation in Galaxy we currently use the wrappers `richard-burhans:kegalign` and `richard-burhans:batched_lastz` from the [Main Tool Shed](https://toolshed.g2.bx.psu.edu/).
+Try the tools at usegalaxy.org: [kegalign](https://usegalaxy.org/root?tool_id=toolshed.g2.bx.psu.edu/repos/richard-burhans/kegalign/kegalign/), [batched_lastz](https://usegalaxy.org/root?tool_id=toolshed.g2.bx.psu.edu/repos/richard-burhans/batched_lastz/batched_lastz/)
 
 * Script to create conda environment
 
@@ -149,6 +149,6 @@ Matrix can be supplied as an input to **--scoring** parameter. Substitution matr
 
 The default output is a MAF alignment file. Other formats can be selected with the **--format** parameter.  See [LASTZ manual](https://lastz.github.io/lastz/#formats) for description of possible formats.
 
-## <a name="cite_segalign"></a> Citing SegAlign
+## <a name="cite_kegalign"></a> Citing KegAlign
 
-S. Goenka, Y. Turakhia, B. Paten and M. Horowitz,  "[SegAlign: A Scalable GPU-Based Whole Genome Aligner](https://doi.org/10.1109/SC41405.2020.00043)," in 2020 SC20: International Conference for High Performance Computing, Networking, Storage and Analysis (SC), Atlanta, GA, US, 2020 pp. 540-552. doi: 10.1109/SC41405.2020.00043
+S. Goenka, Y. Turakhia, B. Paten and M. Horowitz,  "[KegAlign: A Scalable GPU-Based Whole Genome Aligner](https://doi.org/10.1109/SC41405.2020.00043)," in 2020 SC20: International Conference for High Performance Computing, Networking, Storage and Analysis (SC), Atlanta, GA, US, 2020 pp. 540-552. doi: 10.1109/SC41405.2020.00043

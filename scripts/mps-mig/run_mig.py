@@ -68,7 +68,7 @@ class GPU_queue:
     def check_completion(self) -> None:
         completed_uid = set([f for f in os.listdir(self.uid_folder) if self.uid_prefix in f and os.path.isfile(os.path.join(self.uid_folder, f))])
 
-        # check successfully completed jobs using file output from modified run_segalign script
+        # check successfully completed jobs using file output from modified run_kegalign script
         uids_in_progress = completed_uid - self.completed_uid_history
         self.remove_uids(list(uids_in_progress))
 
@@ -333,14 +333,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target", type=str, required=True, help="Directory containing partitioned input target file.")
     parser.add_argument("--tmp_dir", type=str, required=True, help="Directory to store temporary files.")
     parser.add_argument("--output", type=str, required=True, help="Output alignment file name.")
-    parser.add_argument("--format", type=str, default="maf-", help="Output alignment file format. Must be supported by SegAlign, i.e. able to be concatenated.")
+    parser.add_argument("--format", type=str, default="maf-", help="Output alignment file format. Must be supported by KegAlign, i.e. able to be concatenated.")
     parser.add_argument("--mps_pipe_dir", type=str, help="MPS pipe directory.")
-    parser.add_argument("--num_threads", type=int, default=-1, help="Number of threads to use for each SegAlign process.")
-    parser.add_argument("--segment_size", type=int, default=0, help="Maximum segment size output by SegAlign. Segment files larger than this parameter are partitioned. 0 does no partitioning, -1 estimates best partition size. See diagonal_partition.py")
-    parser.add_argument("--segalign_cmd", type=str, default="run_segalign_symlink", help="Command to SegAlign runner script. This is called when aligning each pair of query and target files.")
-    parser.add_argument("--opt_cmd", type=str, default="", help="Additional options to pass to SegAlign runner script.")
+    parser.add_argument("--num_threads", type=int, default=-1, help="Number of threads to use for each KegAlign process.")
+    parser.add_argument("--segment_size", type=int, default=0, help="Maximum segment size output by KegAlign. Segment files larger than this parameter are partitioned. 0 does no partitioning, -1 estimates best partition size. See diagonal_partition.py")
+    parser.add_argument("--kegalign_cmd", type=str, default="run_kegalign_symlink", help="Command to KegAlign runner script. This is called when aligning each pair of query and target files.")
+    parser.add_argument("--opt_cmd", type=str, default="", help="Additional options to pass to KegAlign runner script.")
     parser.add_argument("--keep_partial", action="store_true", help="Keep output files for each pair of alignments after combining them. It is recommended to keep these files for debugging purposes or if output file format does not support concatenation.")
-    parser.add_argument("--only_missing", action="store_true", help="Only run SegAlign for missing pairs of query and target files, if any failed for some reason.")
+    parser.add_argument("--only_missing", action="store_true", help="Only run KegAlign for missing pairs of query and target files, if any failed for some reason.")
     parser.add_argument("--skip_mps_control", action="store_true", help="Skip starting and stopping MPS daemon. Used for debugging purposes.")
     parser.add_argument("--start_uid", type=int, default=None, help="Start alignmet from a specific pair. Used for debugging purposes.")
     parser.add_argument("--verbose", action="store_true", help="Print additional information to console.")
@@ -384,11 +384,11 @@ def main() -> None:
         sys.exit(f"ERROR: {str(e)}")
 
     timer = datetime.datetime.now()
-    # TODO script currently only supports 1 GPU per SegAlign process. Add multiple GPU support if needed
-    gpu_per_segalign = 1
+    # TODO script currently only supports 1 GPU per KegAlign process. Add multiple GPU support if needed
+    gpu_per_kegalign = 1
 
-    # GPU is determined using CUDA_VISIBLE_DEVICES variable when calling segalign script.
-    # NOTE: Multiple MIG devices canNOT be used by the same SegAlign instance due to CUDA
+    # GPU is determined using CUDA_VISIBLE_DEVICES variable when calling kegalign script.
+    # NOTE: Multiple MIG devices canNOT be used by the same KegAlign instance due to CUDA
     # limitations. See https://docs.nvidia.com/datacenter/tesla/mig-user-guide/index.html#cuda-visible-devices
 
     # TODO make this non hardcoded
@@ -453,12 +453,12 @@ def main() -> None:
         part = 1
         refresh_time = args.refresh
 
-        # Main purpose of GPU_queue is to keep track of running SegAlign processes on each GPU or MIG device
-        # Since we call a runner script, which calls the SegAlign executable we want to keep track of, using
-        # process id to keep track of SegAlign instances is difficult. Instead we use temporary files (UID files)
-        # to keep track of running processes. This is done by the segalign runner script writing a UID file when
-        # a segalign process is successfully completed.
-        # If the run_mig.py and segalign runner script were to be combined into one script, this process would be
+        # Main purpose of GPU_queue is to keep track of running KegAlign processes on each GPU or MIG device
+        # Since we call a runner script, which calls the KegAlign executable we want to keep track of, using
+        # process id to keep track of KegAlign instances is difficult. Instead we use temporary files (UID files)
+        # to keep track of running processes. This is done by the kegalign runner script writing a UID file when
+        # a kegalign process is successfully completed.
+        # If the run_mig.py and kegalign runner script were to be combined into one script, this process would be
         # much simpler.
         gpu_queue = GPU_queue(mig_list, tmp_dir, uid_prefix, num_MPS)
         print(f"GPU QUEUE: {gpu_queue.queue}")
@@ -547,7 +547,7 @@ def main() -> None:
                 uid_name = uid_prefix + str(part)
 
                 out = os.path.join(tmp_dir, f"part_{part}.{output_format}")
-                command = f"CUDA_VISIBLE_DEVICES={mig_device} {args.segalign_cmd} {args.opt_cmd} {os.path.join(target_dir, t)} {os.path.join(query_dir, q)} --debug --output={out} --format={args.format} --num_gpu {gpu_per_segalign} --num_threads {args.num_threads} --uid {os.path.abspath(os.path.join(tmp_dir, uid_name))} {segment_command}"
+                command = f"CUDA_VISIBLE_DEVICES={mig_device} {args.kegalign_cmd} {args.opt_cmd} {os.path.join(target_dir, t)} {os.path.join(query_dir, q)} --debug --output={out} --format={args.format} --num_gpu {gpu_per_kegalign} --num_threads {args.num_threads} --uid {os.path.abspath(os.path.join(tmp_dir, uid_name))} {segment_command}"
                 command = f"CUDA_MPS_PIPE_DIRECTORY={os.path.join(mps_pipe_dir, mig_device)} " + command
 
                 if bool(args.only_missing):
@@ -595,7 +595,7 @@ def main() -> None:
                 for uid in failed_uids:
                     python_log += f"FAILED UID {uid}\n"
                     print(f"FAILED UID {uid}")
-            # Resubmission of failed SegAlign processes can be done
+            # Resubmission of failed KegAlign processes can be done
             # with the parameter --only_missing
             # TODO add support resubmission for failed UIDs after
             # all pairs have been submitted

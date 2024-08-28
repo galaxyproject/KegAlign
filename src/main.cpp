@@ -153,7 +153,7 @@ int main(int argc, char** argv){
     }
     catch(std::exception &e){
         if(vm.count("version")){
-            std::cerr << "SegAlign Version: " << VERSION << std::endl;
+            std::cerr << "KegAlign Version: " << VERSION << std::endl;
             return 0;
         }
 
@@ -163,7 +163,7 @@ int main(int argc, char** argv){
             }
         }
 	
-        fprintf(stderr, "\nUsage: run_segalign target query [options]\n"); 
+        fprintf(stderr, "\nUsage: run_kegalign target query [options]\n"); 
         fprintf(stderr, "Version: %s\n\n", VERSION);
         std::cerr << desc << std::endl;
         std::cerr << scoring_desc << std::endl;
