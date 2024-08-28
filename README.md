@@ -54,6 +54,32 @@ Try the tools at usegalaxy.org: [segalign](https://usegalaxy.org/root?tool_id=to
 
 #### Running a Sample Alignment
 
+    # install segalign
+    git clone https://github.com/galaxyproject/SegAlign.git
+    cd SegAlign
+    ./scripts/make-conda-env.bash
+    source ./conda-env.bash
+
+    # convert target (ref) and query to 2bit
+    mkdir work
+    faToTwoBit <(gzip -cdfq ./test-data/apple.fasta.gz) work/ref.2bit
+    faToTwoBit <(gzip -cdfq ./test-data/orange.fasta.gz) work/query.2bit
+
+    # generate LASTZ keg
+    python ./scripts/runner.py --diagonal-partition --format maf- --num-cpu 16 --num-gpu 1 --output-file data_package.tgz --output-type tarball --tool_directory ./scripts test-data/apple.fasta.gz test-data/orange.fasta.gz
+    python ./scripts/package_output.py --format_selector maf --tool_directory ./scripts
+
+    # run LASTZ keg
+    python ./scripts/run_lastz_tarball.py --input=data_package.tgz --output=apple_orange.maf --parallel=16
+
+    # check output
+    diff apple_orange.maf <(gzip -cdfq ./test-data/apple_orange.maf.gz)
+
+    # command-line segalign
+    segalign test-data/apple.fasta.gz test-data/orange.fasta.gz work/ --num_gpu 1 --num_threads 16 > lastz-commands.txt
+    bash lastz-commands.txt
+    (echo "##maf version=1"; cat *.maf-) > apple_orange.maf
+
 #### Running with MIG/MPS
 
 ### <a name="scoring"></a>Scoring Options

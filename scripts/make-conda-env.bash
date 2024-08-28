@@ -67,7 +67,10 @@ if [ $dev -eq 0 ]; then
             --override-channels \
             --strict-channel-priority \
             --yes \
+            "coreutils" \
+            "samtools" \
             "segalign-galaxy" \
+            "mbuffer" \
             "nvidia-ml-py"
     fi
 elif [ $dev -eq 1 ]; then
