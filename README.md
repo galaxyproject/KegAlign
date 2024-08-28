@@ -43,8 +43,8 @@ Try the tools at usegalaxy.org: [segalign](https://usegalaxy.org/root?tool_id=to
 * Script to create conda environment
 
 ```bash
-git clone https://github.com/galaxyproject/SegAlign.git
-cd SegAlign
+git clone https://github.com/galaxyproject/KegAlign.git
+cd KegAlign
 ./scripts/make-conda-env.bash
 source ./conda-env.bash
 ```
@@ -52,8 +52,8 @@ source ./conda-env.bash
 * Script to install development enviroment
 
 ```bash
-git clone https://github.com/galaxyproject/SegAlign.git
-cd SegAlign
+git clone https://github.com/galaxyproject/KegAlign.git
+cd KegAlign
 ./scripts/make-conda-env.bash -dev
 source ./conda-env-dev.bash
 
@@ -63,7 +63,7 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 make
 ```
 ## <a name="dependencies"></a> Dependencies
-The following dependencies are required by SegAlign:
+The following dependencies are required by KegAlign:
 
   * [CMake](https://cmake.org/) >= 3.8
   * oneAPI Threading Building Blocks ([oneTBB](https://oneapi-src.github.io/oneTBB/)) [2020.2](https://github.com/oneapi-src/oneTBB/releases/tag/v2020.2)
@@ -77,9 +77,9 @@ The following dependencies are required by SegAlign:
 
 #### Running a Sample Alignment
 ```bash
-# install segalign
-git clone https://github.com/galaxyproject/SegAlign.git
-cd SegAlign
+# install kegalign
+git clone https://github.com/galaxyproject/KegAlign.git
+cd KegAlign
 ./scripts/make-conda-env.bash
 source ./conda-env.bash
 
@@ -98,8 +98,8 @@ python ./scripts/run_lastz_tarball.py --input=data_package.tgz --output=apple_or
 # check output
 diff apple_orange.maf <(gzip -cdfq ./test-data/apple_orange.maf.gz)
 
-# command-line segalign
-segalign test-data/apple.fasta.gz test-data/orange.fasta.gz work/ --num_gpu 1 --num_threads 16 > lastz-commands.txt
+# command-line kegalign
+kegalign test-data/apple.fasta.gz test-data/orange.fasta.gz work/ --num_gpu 1 --num_threads 16 > lastz-commands.txt
 bash lastz-commands.txt
 (echo "##maf version=1"; cat *.maf-) > apple_orange.maf
 ```
