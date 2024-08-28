@@ -59,7 +59,7 @@ if __name__ == "__main__":
             break
 
     if segment_index is None:
-        sys.exit(f"Error: could not segment key {segment_key} in parameters {params}")
+        sys.exit(f"Error: could not get segment key {segment_key} from parameters {params}")
 
     if input_file is None:
         sys.exit(f"Error: could not get segment file from parameters {params}")
@@ -142,7 +142,7 @@ if __name__ == "__main__":
         sys.exit(f"Error: could not get output key {output_key} from parameters {params}")
 
     if strand_index is None:
-        sys.exit(f"Error: could not output key {strand_key} in parameters {params}")
+        sys.exit(f"Error: could not get strand key {strand_key} from parameters {params}")
 
     # error file is at very end
     err_index = -1
