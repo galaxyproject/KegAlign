@@ -12,8 +12,8 @@ This is a [@galaxyproject](https://github.com/galaxyproject)'s modified fork of 
 ## Table of Contents
 
 - [Overview](#overview)
-- [Dependencies](#dependencies)
 - [Installation](#installation)
+  - [Dependencies](#dependencies)
 - [Usage](#usage)
   - [Alignment](#alignment)
   - [Scoring Options](#scoring)
@@ -24,23 +24,14 @@ This is a [@galaxyproject](https://github.com/galaxyproject)'s modified fork of 
 
 Precise genome aligner efficiently leveraging GPUs.
 
-## <a name="dependencies"></a> Dependencies
-The following dependencies are required by SegAlign:
-
-  * [CMake](https://cmake.org/) >= 3.8
-  * oneAPI Threading Building Blocks ([oneTBB](https://oneapi-src.github.io/oneTBB/)) [2020.2](https://github.com/oneapi-src/oneTBB/releases/tag/v2020.2)
-  * [Boost C++ Libraries](https://www.boost.org/) >= 1.70
-  * [LASTZ](https://github.com/lastz/lastz) 1.04.22
-  * faToTwoBit (from [UCSC Genome Browser source](https://github.com/ucscGenomeBrowser/kent))
-
 ### <a name="changes"></a> Changes from the original implementation
 
-- Cleaned up build files and addressed compiler warnings
+- Added advanced runner script allowing the usage of MIG and/or MPS for better GPU utilization
 - Updated to compile with TBB (Threading Building Blocks) [version 2020.2](https://github.com/oneapi-src/oneTBB/releases/tag/v2020.2)
 - Fixed the **--scoring** option. It can now read and use the substitution matrix from a LASTZ [Scoring File](https://lastz.github.io/lastz/#fmt_scoring)
 - Added **--num_threads** option to limit the number of threads used
 - Added **--segment_size** option to limit maximum number of HSPs per segment file for CPU load balancing
-- Added optional runner script using MIG and/or MPS for better GPU utilization
+- Cleaned up build files and addressed compiler warnings
 
 ## <a name="installation"></a> Installation
 
@@ -71,6 +62,14 @@ cd build
 cmake -DCMAKE_BUILD_TYPE=Release ..
 make
 ```
+## <a name="dependencies"></a> Dependencies
+The following dependencies are required by SegAlign:
+
+  * [CMake](https://cmake.org/) >= 3.8
+  * oneAPI Threading Building Blocks ([oneTBB](https://oneapi-src.github.io/oneTBB/)) [2020.2](https://github.com/oneapi-src/oneTBB/releases/tag/v2020.2)
+  * [Boost C++ Libraries](https://www.boost.org/) >= 1.70
+  * [LASTZ](https://github.com/lastz/lastz) 1.04.22
+  * faToTwoBit (from [UCSC Genome Browser source](https://github.com/ucscGenomeBrowser/kent))
 
 ## <a name="usage"></a> Usage
 
