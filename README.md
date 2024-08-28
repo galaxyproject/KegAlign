@@ -3,6 +3,7 @@
 
 [![License][license-badge]][license-link]
 [![Published in SC20](https://img.shields.io/badge/published%20in-SC20-blue.svg)](https://doi.ieeecomputersociety.org/10.1109/SC41405.2020.00043)
+[![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](http://bioconda.github.io/recipes/segalign-full/README.html)
 
 <img src="kegalign_logo.webp" width="300">
 
@@ -47,6 +48,29 @@ For standalone installation use Conda: `conda install conda-forge::segalign`
 
 For installation in Galaxy we currently use the wrappers `richard-burhans:segalign` and `richard-burhans:batched_lastz` from the [Main Tool Shed](https://toolshed.g2.bx.psu.edu/).
 Try the tools at usegalaxy.org: [segalign](https://usegalaxy.org/root?tool_id=toolshed.g2.bx.psu.edu/repos/richard-burhans/segalign/segalign/), [batched_lastz](https://usegalaxy.org/root?tool_id=toolshed.g2.bx.psu.edu/repos/richard-burhans/batched_lastz/batched_lastz/)
+
+* Script to create conda environment
+
+```bash
+git clone https://github.com/galaxyproject/SegAlign.git
+cd SegAlign
+./scripts/make-conda-env.bash
+source ./conda-env.bash
+```
+
+* Script to install development enviroment
+
+```bash
+git clone https://github.com/galaxyproject/SegAlign.git
+cd SegAlign
+./scripts/make-conda-env.bash -dev
+source ./conda-env-dev.bash
+
+mkdir build
+cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make
+```
 
 ## <a name="usage"></a> Usage
 
