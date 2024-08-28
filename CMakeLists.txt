@@ -4,11 +4,11 @@ cmake_policy(SET CMP0128 NEW)   # CMake 3.22
 cmake_policy(SET CMP0146 NEW)   # CMake 3.27
 cmake_policy(SET CMP0167 NEW)   # CMake 3.30
 
-execute_process(COMMAND bash "-c" "${CMAKE_SOURCE_DIR}/scripts/get-cuda-arches.bash" OUTPUT_VARIABLE SEGALIGN_CUDA_ARCHITECTURES)
-set(CMAKE_CUDA_ARCHITECTURES "${SEGALIGN_CUDA_ARCHITECTURES}")
+execute_process(COMMAND bash "-c" "${CMAKE_SOURCE_DIR}/scripts/get-cuda-arches.bash" OUTPUT_VARIABLE KEGALIGN_CUDA_ARCHITECTURES)
+set(CMAKE_CUDA_ARCHITECTURES "${KEGALIGN_CUDA_ARCHITECTURES}")
 
-project(segalign LANGUAGES C CXX CUDA)
-project(segalign_repeat_masker LANGUAGES C CXX CUDA)
+project(kegalign LANGUAGES C CXX CUDA)
+project(kegalign_repeat_masker LANGUAGES C CXX CUDA)
 
 set(CMAKE_CUDA_COMPILER nvcc)
 
@@ -26,7 +26,7 @@ include_directories(${ZLIB_INCLUDE_DIR})
 find_package(Boost COMPONENTS program_options REQUIRED)
 include_directories(${Boost_INCLUDE_DIRS})
 
-add_executable(segalign
+add_executable(kegalign
     common/DRAM.cpp
     common/ntcoding.cpp
     common/seed_filter_interface.cu
@@ -40,7 +40,7 @@ add_executable(segalign
     src/main.cpp
     )
 
-add_executable(segalign_repeat_masker
+add_executable(kegalign_repeat_masker
     common/DRAM.cpp
     common/ntcoding.cpp
     common/seed_filter_interface.cu
@@ -57,18 +57,18 @@ add_executable(segalign_repeat_masker
 set(LIBS rt stdc++ ${TBB_IMPORTED_TARGETS} ${Boost_LIBRARIES} ${CUDA_LIBRARIES} ${ZLIB_LIBRARIES})
 
 set_target_properties(
-    segalign 
-    segalign_repeat_masker
+    kegalign 
+    kegalign_repeat_masker
     PROPERTIES 
       CUDA_SEPARABLE_COMPILATION ON
       CUDA_STANDARD 14
       )
 
-target_compile_options(segalign PRIVATE -DTBB_SUPPRESS_DEPRECATED_MESSAGES)
-target_compile_options(segalign_repeat_masker PRIVATE -DTBB_SUPPRESS_DEPRECATED_MESSAGES)
+target_compile_options(kegalign PRIVATE -DTBB_SUPPRESS_DEPRECATED_MESSAGES)
+target_compile_options(kegalign_repeat_masker PRIVATE -DTBB_SUPPRESS_DEPRECATED_MESSAGES)
 
-target_link_libraries(segalign PRIVATE ${LIBS})
-target_link_libraries(segalign_repeat_masker PRIVATE ${LIBS})
+target_link_libraries(kegalign PRIVATE ${LIBS})
+target_link_libraries(kegalign_repeat_masker PRIVATE ${LIBS})
 
-target_include_directories(segalign PRIVATE ${PROJECT_SOURCE_DIR}/common/ ${PROJECT_SOURCE_DIR}/src/)
-target_include_directories(segalign_repeat_masker PRIVATE ${PROJECT_SOURCE_DIR}/common/ ${PROJECT_SOURCE_DIR}/repeat_masker_src/)
+target_include_directories(kegalign PRIVATE ${PROJECT_SOURCE_DIR}/common/ ${PROJECT_SOURCE_DIR}/src/)
+target_include_directories(kegalign_repeat_masker PRIVATE ${PROJECT_SOURCE_DIR}/common/ ${PROJECT_SOURCE_DIR}/repeat_masker_src/)

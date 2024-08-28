@@ -2,7 +2,7 @@
 
 
 """
-Diagonal partitioning for segment files output by SegAlign.
+Diagonal partitioning for segment files output by KegAlign.
 
 Usage:
 diagonal_partition.py <max-segments> <lastz-command>
@@ -47,7 +47,7 @@ if __name__ == "__main__":
         print(" ".join(params), flush=True)
         sys.exit(0)
 
-    # Parsing command output from SegAlign
+    # Parsing command output from KegAlign
     segment_key = "--segments="
     segment_index = None
     input_file = None

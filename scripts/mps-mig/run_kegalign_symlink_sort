@@ -88,10 +88,10 @@ for ((i=0; i < $total_args; i++)){
 1>&2 echo "UID path:  $uid"
 
 if [ $hp -eq 1 ]; then
-  segalign --help
+  kegalign --help
 
 elif [ $# -eq 1 ] || [ $# -eq 0 ]; then
-  segalign $1
+  kegalign $1
 
 else
   refPath=$(readlink -f $1)
@@ -133,7 +133,7 @@ else
   fi
 
   1>&2 echo ""
-  1>&2 echo "Executing: \"segalign $refPath $queryPath $DATA_FOLDER $optionalArguments\""
+  1>&2 echo "Executing: \"kegalign $refPath $queryPath $DATA_FOLDER $optionalArguments\""
 
   pids=""
   FAIL=0
@@ -182,9 +182,9 @@ else
         count=$(ps -x --format=command | grep '[l]astz' | wc -l);
         pids=$running;
       done;
-    done < <(stdbuf -oL segalign_sort $segment_size $line_ | stdbuf -oL pv -B 128M -C)
-  done < <((stdbuf -oL segalign $refPath $queryPath $DATA_FOLDER $optionalArguments && touch $uid) | stdbuf -oL pv -B 128M -C)  
-  #done < <(stdbuf -oL segalign $refPath $queryPath $DATA_FOLDER $optionalArguments; if [ $? -eq 0 ]; then touch $uid; fi | stdbuf -oL mbuffer -m 128M -s 512 -q -v 0)
+    done < <(stdbuf -oL kegalign_sort $segment_size $line_ | stdbuf -oL pv -B 128M -C)
+  done < <((stdbuf -oL kegalign $refPath $queryPath $DATA_FOLDER $optionalArguments && touch $uid) | stdbuf -oL pv -B 128M -C)  
+  #done < <(stdbuf -oL kegalign $refPath $queryPath $DATA_FOLDER $optionalArguments; if [ $? -eq 0 ]; then touch $uid; fi | stdbuf -oL mbuffer -m 128M -s 512 -q -v 0)
   wait $pids || let "FAIL+=1"
   }
 
@@ -238,7 +238,7 @@ else
       fi
 
       if [ $mk -eq 1 ]; then
-        echo "# segalign end-of-file" >> $output_filename
+        echo "# kegalign end-of-file" >> $output_filename
       fi
 
     else
@@ -258,7 +258,7 @@ else
       fi
 
       if [ $mk -eq 1 ]; then
-        echo "# segalign end-of-file"
+        echo "# kegalign end-of-file"
       fi
 
     fi

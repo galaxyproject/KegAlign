@@ -55,34 +55,32 @@ if [ $dev -eq 0 ]; then
     echo "source \"${miniforge_root}/etc/profile.d/conda.sh\"" > "$conda_env_file"
     echo "source \"${miniforge_root}/etc/profile.d/mamba.sh\"" >> "$conda_env_file"
     source "$conda_env_file"
-    echo "conda activate segalign" >> "$conda_env_file"
+    echo "conda activate kegalign" >> "$conda_env_file"
 
-    installed=$(conda env list | grep -E "^segalign\b" || true)
+    installed=$(conda env list | grep -E "^kegalign\b" || true)
     if [ -z "$installed" ]; then
         mamba create \
-            --name segalign \
+            --name kegalign \
             --channel conda-forge \
             --channel bioconda \
             --channel defaults \
             --override-channels \
             --strict-channel-priority \
             --yes \
-            "coreutils" \
             "samtools" \
-            "segalign-galaxy" \
+            "kegalign-galaxy" \
             "mbuffer" \
-            "nvidia-ml-py"
     fi
 elif [ $dev -eq 1 ]; then
     echo "source \"${miniforge_root}/etc/profile.d/conda.sh\"" > "$conda_env_dev_file"
     echo "source \"${miniforge_root}/etc/profile.d/mamba.sh\"" >> "$conda_env_dev_file"
     source "$conda_env_dev_file"
-    echo "conda activate segalign-dev" >> "$conda_env_dev_file"
+    echo "conda activate kegalign-dev" >> "$conda_env_dev_file"
 
-    installed=$(conda env list | grep -E "^segalign-dev\b" || true)
+    installed=$(conda env list | grep -E "^kegalign-dev\b" || true)
     if [ -z "$installed" ]; then
         mamba create \
-            --name segalign-dev \
+            --name kegalign-dev \
             --channel conda-forge \
             --channel bioconda \
             --channel defaults \
@@ -99,7 +97,6 @@ elif [ $dev -eq 1 ]; then
             "python=3.12" \
             "tbb-devel=2020.2.*" \
             "zlib"
-
     fi
 fi
 
