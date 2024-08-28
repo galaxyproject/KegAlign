@@ -128,4 +128,4 @@ The default output is a MAF alignment file. Other formats can be selected with t
 
 ## <a name="cite_segalign"></a> Citing SegAlign
 
-S. Goenka, Y. Turakhia, B. Paten and M. Horowitz,  "SegAlign: A Scalable GPU-Based Whole Genome Aligner," in 2020 SC20: International Conference for High Performance Computing, Networking, Storage and Analysis (SC), Atlanta, GA, US, 2020 pp. 540-552. doi: 10.1109/SC41405.2020.00043
+S. Goenka, Y. Turakhia, B. Paten and M. Horowitz,  "[SegAlign: A Scalable GPU-Based Whole Genome Aligner](https://doi.org/10.1109/SC41405.2020.00043)," in 2020 SC20: International Conference for High Performance Computing, Networking, Storage and Analysis (SC), Atlanta, GA, US, 2020 pp. 540-552. doi: 10.1109/SC41405.2020.00043
