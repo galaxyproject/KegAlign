@@ -53,34 +53,57 @@ Try the tools at usegalaxy.org: [segalign](https://usegalaxy.org/root?tool_id=to
 ## <a name="alignment"></a> Alignment
 
 #### Running a Sample Alignment
+```bash
+# install segalign
+git clone https://github.com/galaxyproject/SegAlign.git
+cd SegAlign
+./scripts/make-conda-env.bash
+source ./conda-env.bash
 
-    # install segalign
-    git clone https://github.com/galaxyproject/SegAlign.git
-    cd SegAlign
-    ./scripts/make-conda-env.bash
-    source ./conda-env.bash
+# convert target (ref) and query to 2bit
+mkdir work
+faToTwoBit <(gzip -cdfq ./test-data/apple.fasta.gz) work/ref.2bit
+faToTwoBit <(gzip -cdfq ./test-data/orange.fasta.gz) work/query.2bit
 
-    # convert target (ref) and query to 2bit
-    mkdir work
-    faToTwoBit <(gzip -cdfq ./test-data/apple.fasta.gz) work/ref.2bit
-    faToTwoBit <(gzip -cdfq ./test-data/orange.fasta.gz) work/query.2bit
+# generate LASTZ keg
+python ./scripts/runner.py --diagonal-partition --format maf- --num-cpu 16 --num-gpu 1 --output-file data_package.tgz --output-type tarball --tool_directory ./scripts test-data/apple.fasta.gz test-data/orange.fasta.gz
+python ./scripts/package_output.py --format_selector maf --tool_directory ./scripts
 
-    # generate LASTZ keg
-    python ./scripts/runner.py --diagonal-partition --format maf- --num-cpu 16 --num-gpu 1 --output-file data_package.tgz --output-type tarball --tool_directory ./scripts test-data/apple.fasta.gz test-data/orange.fasta.gz
-    python ./scripts/package_output.py --format_selector maf --tool_directory ./scripts
+# run LASTZ keg
+python ./scripts/run_lastz_tarball.py --input=data_package.tgz --output=apple_orange.maf --parallel=16
 
-    # run LASTZ keg
-    python ./scripts/run_lastz_tarball.py --input=data_package.tgz --output=apple_orange.maf --parallel=16
+# check output
+diff apple_orange.maf <(gzip -cdfq ./test-data/apple_orange.maf.gz)
 
-    # check output
-    diff apple_orange.maf <(gzip -cdfq ./test-data/apple_orange.maf.gz)
-
-    # command-line segalign
-    segalign test-data/apple.fasta.gz test-data/orange.fasta.gz work/ --num_gpu 1 --num_threads 16 > lastz-commands.txt
-    bash lastz-commands.txt
-    (echo "##maf version=1"; cat *.maf-) > apple_orange.maf
+# command-line segalign
+segalign test-data/apple.fasta.gz test-data/orange.fasta.gz work/ --num_gpu 1 --num_threads 16 > lastz-commands.txt
+bash lastz-commands.txt
+(echo "##maf version=1"; cat *.maf-) > apple_orange.maf
+```
 
 #### Running with MIG/MPS
+GPU utilization can be increased by using MIG and/or MPS, leading up to 20% faster alignments.
+
+* Preparing inputs
+
+```bash
+mkdir query_split target_split
+./scripts/mps-mig/split_input.py --input ./test-data/apple.fasta.gz --out query_split --to_2bit --goal_bp 20000000
+./scripts/mps-mig/split_input.py --input ./test-data/orange.fasta.gz --out target_split --to_2bit --goal_bp 20000000
+mkdir tmp
+```
+
+* Select GPU UUIDs to run on using
+
+```bash
+nvidia-smi -L
+```
+
+* run on two GPUs with 4 MPS processes per GPU (replace [GPU-UUID#] with outputs from above command)
+
+```bash
+python ./scripts/mps-mig/run_mig.py [GPU-UUID1],[GPU-UUID2] --MPS 4 --target ./target_split --query ./query_split  --tmp_dir ./tmp/ --mps_pipe_dir ./tmp/ --output ./apples_oranges.maf --num_threads 64
+```
 
 ### <a name="scoring"></a>Scoring Options
 
