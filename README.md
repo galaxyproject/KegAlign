@@ -36,6 +36,7 @@ Precise genome aligner efficiently leveraging GPUs.
 ## <a name="installation"></a> Installation
 
 For standalone installation use Conda: `conda install conda-forge::kegalign`
+
 For standalone installation with additional tools use Bioconda: `conda install bioconda::kegalign-full`
 
 For installation in Galaxy we currently use the wrappers [`richard-burhans:kegalign`](https://toolshed.g2.bx.psu.edu/view/richard-burhans/kegalign
