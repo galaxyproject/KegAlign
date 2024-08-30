@@ -113,10 +113,12 @@ GPU utilization can be increased by using MIG and/or MPS, leading up to 20% fast
 
 * Preparing inputs
 
+With the provided *split_input.py* script we assign individual chromosomes from the input genome into separate fasta files (up to **--max_chunks**), each with roughly **--goal_bp** number of base pairs, which will then be run in parallel on the same GPU(s). Since individual chromosomes are not split, the *--goal_bp* parameter should not be significantly smaller than the largest chromosome in the input file to ensure similar sized chunks. A good *--goal_bp* size for the human genome is 200 million base pairs.
+
 ```bash
 mkdir query_split target_split
-./scripts/mps-mig/split_input.py --input ./test-data/apple.fasta.gz --out query_split --to_2bit --goal_bp 20000000
-./scripts/mps-mig/split_input.py --input ./test-data/orange.fasta.gz --out target_split --to_2bit --goal_bp 20000000
+./scripts/mps-mig/split_input.py --input ./test-data/apple.fasta.gz --out query_split --to_2bit --goal_bp 20000000 --max_chunks 30
+./scripts/mps-mig/split_input.py --input ./test-data/orange.fasta.gz --out target_split --to_2bit --goal_bp 20000000 --max_chunks 30
 mkdir tmp
 ```
 
@@ -127,6 +129,8 @@ nvidia-smi -L
 ```
 
 * run on two GPUs with 4 MPS processes per GPU (replace [GPU-UUID#] with outputs from above command)
+
+Each SegAlign instance, with default settings, uses around 13GiB of GPU memory. The chosen GPUs or MIG instances should each have enough GPU memory to run the number of SegAlign instances defined by the *--MPS* parameter.
 
 ```bash
 python ./scripts/mps-mig/run_mig.py [GPU-UUID1],[GPU-UUID2] --MPS 4 --target ./target_split --query ./query_split  --tmp_dir ./tmp/ --mps_pipe_dir ./tmp/ --output ./apples_oranges.maf --num_threads 64
