@@ -67,9 +67,7 @@ if [ $dev -eq 0 ]; then
             --override-channels \
             --strict-channel-priority \
             --yes \
-            "samtools" \
-            "kegalign-galaxy" \
-            "mbuffer" \
+            "kegalign-full"
     fi
 elif [ $dev -eq 1 ]; then
     echo "source \"${miniforge_root}/etc/profile.d/conda.sh\"" > "$conda_env_dev_file"
