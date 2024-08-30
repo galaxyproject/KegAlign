@@ -37,8 +37,10 @@ Precise genome aligner efficiently leveraging GPUs.
 
 For standalone installation use Conda: `conda install conda-forge::kegalign`
 
-For installation in Galaxy we currently use the wrappers `richard-burhans:kegalign` and `richard-burhans:batched_lastz` from the [Main Tool Shed](https://toolshed.g2.bx.psu.edu/).
-Try the tools at usegalaxy.org: [kegalign](https://usegalaxy.org/root?tool_id=toolshed.g2.bx.psu.edu/repos/richard-burhans/kegalign/kegalign/), [batched_lastz](https://usegalaxy.org/root?tool_id=toolshed.g2.bx.psu.edu/repos/richard-burhans/batched_lastz/batched_lastz/)
+For installation in Galaxy we currently use the wrappers [`richard-burhans:kegalign`](https://toolshed.g2.bx.psu.edu/view/richard-burhans/kegalign
+) and [`richard-burhans:batched_lastz`](https://toolshed.g2.bx.psu.edu/view/richard-burhans/batched_lastz
+) from the [Main Tool Shed](https://toolshed.g2.bx.psu.edu/).
+Try the tools at usegalaxy.org: [kegalign](https://usegalaxy.org/root?tool_id=toolshed.g2.bx.psu.edu/repos/richard-burhans/kegalign/kegalign), [batched_lastz](https://usegalaxy.org/root?tool_id=toolshed.g2.bx.psu.edu/repos/richard-burhans/batched_lastz/batched_lastz)
 
 * Script to create conda environment
 
