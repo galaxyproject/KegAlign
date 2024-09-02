@@ -130,7 +130,7 @@ nvidia-smi -L
 
 * run on two GPUs with 4 MPS processes per GPU (replace [GPU-UUID#] with outputs from above command)
 
-Each SegAlign instance, with default settings, uses around 12 to 16 GiB of GPU memory. The chosen GPUs or MIG instances should each have enough GPU memory to run the number of SegAlign instances defined by the *--MPS* parameter.
+Each KegAlign instance, with default settings, uses around 12 to 16 GiB of GPU memory. The chosen GPUs or MIG instances should each have enough GPU memory to run the number of KegAlign instances defined by the *--MPS* parameter.
 
 ```bash
 python ./scripts/mps-mig/run_mig.py [GPU-UUID1],[GPU-UUID2] --MPS 4 --target ./target_split --query ./query_split  --tmp_dir ./tmp/ --mps_pipe_dir ./tmp/ --output ./apples_oranges.maf --num_threads 64
