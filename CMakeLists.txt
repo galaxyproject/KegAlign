@@ -8,7 +8,6 @@ execute_process(COMMAND bash "-c" "${CMAKE_SOURCE_DIR}/scripts/get-cuda-arches.b
 set(CMAKE_CUDA_ARCHITECTURES "${KEGALIGN_CUDA_ARCHITECTURES}")
 
 project(kegalign LANGUAGES C CXX CUDA)
-project(kegalign_repeat_masker LANGUAGES C CXX CUDA)
 
 set(CMAKE_CUDA_COMPILER nvcc)
 
@@ -40,35 +39,19 @@ add_executable(kegalign
     src/main.cpp
     )
 
-add_executable(kegalign_repeat_masker
-    common/DRAM.cpp
-    common/ntcoding.cpp
-    common/seed_filter_interface.cu
-    common/seed_pos_table.cu
-    common/utilities.c
-    common/dna_utilities.c
-    common/scoring.c
-    repeat_masker_src/seed_filter.cu
-    repeat_masker_src/seeder.cpp
-    repeat_masker_src/segment_printer.cpp
-    repeat_masker_src/main.cpp
-    )
 
 set(LIBS rt stdc++ ${TBB_IMPORTED_TARGETS} ${Boost_LIBRARIES} ${CUDA_LIBRARIES} ${ZLIB_LIBRARIES})
 
 set_target_properties(
     kegalign 
-    kegalign_repeat_masker
     PROPERTIES 
       CUDA_SEPARABLE_COMPILATION ON
       CUDA_STANDARD 14
       )
 
 target_compile_options(kegalign PRIVATE -DTBB_SUPPRESS_DEPRECATED_MESSAGES)
-target_compile_options(kegalign_repeat_masker PRIVATE -DTBB_SUPPRESS_DEPRECATED_MESSAGES)
 
 target_link_libraries(kegalign PRIVATE ${LIBS})
-target_link_libraries(kegalign_repeat_masker PRIVATE ${LIBS})
 
 target_include_directories(kegalign PRIVATE ${PROJECT_SOURCE_DIR}/common/ ${PROJECT_SOURCE_DIR}/src/)
-target_include_directories(kegalign_repeat_masker PRIVATE ${PROJECT_SOURCE_DIR}/common/ ${PROJECT_SOURCE_DIR}/repeat_masker_src/)
+
