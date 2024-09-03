@@ -48,7 +48,7 @@ printer_input seeder_body::operator()(seeder_input input) {
         for (uint32_t i = q_inter_start; i < q_inter_end; i += cfg.wga_chunk_size) {
 
             //end position
-            uint32_t e = std::min(i + cfg.wga_chunk_size, q_inter_end);
+            uint32_t e = std::min(i + cfg.wga_chunk_size, q_inter_end + 1);
 
             std::vector<uint64_t> seed_offset_vector;
             seed_offset_vector.clear();
@@ -87,7 +87,7 @@ printer_input seeder_body::operator()(seeder_input input) {
 
     if(cfg.strand == "minus" || cfg.strand == "both"){
         for (uint32_t i = rc_q_inter_start; i < rc_q_inter_end; i += cfg.wga_chunk_size) {
-            uint32_t e = std::min(i + cfg.wga_chunk_size, rc_q_inter_end);
+            uint32_t e = std::min(i + cfg.wga_chunk_size, rc_q_inter_end + 1);
 
             std::vector<uint64_t> seed_offset_vector;
             seed_offset_vector.clear();
