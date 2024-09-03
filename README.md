@@ -2,7 +2,6 @@
 [license-link]: https://opensource.org/licenses/MIT
 
 [![License][license-badge]][license-link]
-[![Published in SC20](https://img.shields.io/badge/published%20in-SC20-blue.svg)](https://doi.ieeecomputersociety.org/10.1109/SC41405.2020.00043)
 [![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](http://bioconda.github.io/recipes/kegalign-full/README.html)
 
 <img src="kegalign_logo.png" width="300">
@@ -158,4 +157,6 @@ Matrix can be supplied as an input to **--scoring** parameter. Substitution matr
 The default output is a MAF alignment file. Other formats can be selected with the **--format** parameter.  See [LASTZ manual](https://lastz.github.io/lastz/#formats) for description of possible formats.
 
 ## <a name="cite_kegalign"></a> Citing KegAlign
+
+https://www.biorxiv.org/content/10.1101/2024.09.02.610839v1
 
