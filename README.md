@@ -158,5 +158,5 @@ The default output is a MAF alignment file. Other formats can be selected with t
 
 ## <a name="cite_kegalign"></a> Citing KegAlign
 
-https://www.biorxiv.org/content/10.1101/2024.09.02.610839v1
+B Gulhan, R Burhans, R Harris, M Kandemir, M Haeussler, A Nekrutenko. [KegAlign: Optimizing pairwise alignments with diagonal partitioning](https://doi.org/10.1101/2024.09.02.610839). BIORXIV, 2024.  doi: 10.1101/2024.09.02.610839
 
