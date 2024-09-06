@@ -153,7 +153,7 @@ else
         done; 
         pids=$running; 
       done; 
-    done < <(stdbuf -oL kegalign_sort $segment_size $line_ | stdbuf -oL mbuffer -m 128M -s 512 -q -v 0)
+    done < <(stdbuf -oL diagonal_partition.py $segment_size $line_ | stdbuf -oL mbuffer -m 128M -s 512 -q -v 0)
   done < <(stdbuf -oL kegalign $refPath $queryPath $DATA_FOLDER $optionalArguments | stdbuf -oL mbuffer -m 128M -s 512 -q -v 0)
     
     

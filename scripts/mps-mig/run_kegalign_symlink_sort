@@ -182,7 +182,7 @@ else
         count=$(ps -x --format=command | grep '[l]astz' | wc -l);
         pids=$running;
       done;
-    done < <(stdbuf -oL kegalign_sort $segment_size $line_ | stdbuf -oL pv -B 128M -C)
+    done < <(stdbuf -oL diagonal_partition.py $segment_size $line_ | stdbuf -oL pv -B 128M -C)
   done < <((stdbuf -oL kegalign $refPath $queryPath $DATA_FOLDER $optionalArguments && touch $uid) | stdbuf -oL pv -B 128M -C)  
   #done < <(stdbuf -oL kegalign $refPath $queryPath $DATA_FOLDER $optionalArguments; if [ $? -eq 0 ]; then touch $uid; fi | stdbuf -oL mbuffer -m 128M -s 512 -q -v 0)
   wait $pids || let "FAIL+=1"
