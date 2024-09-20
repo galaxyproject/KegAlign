@@ -118,6 +118,8 @@ int main(int argc, char** argv){
     output_desc.add_options()
         ("format", po::value<std::string>(&cfg.output_format)->default_value("maf-"), "format of output file (same formats as provided by LASTZ) - lav, lav+text, axt, axt+, maf, maf+, maf-, sam, softsam, sam-, softsam-, cigar, BLASTN, differences, rdotplot, text")
         ("output", po::value<std::string>(&cfg.output), "output filename")
+        ("target_prefix", po::value<std::string>(&cfg.target_prefix)->default_value(""), "prefix the target sequence names with argument string")
+        ("query_prefix", po::value<std::string>(&cfg.query_prefix)->default_value(""), "prefix the query sequence names with argument string")
         ("markend", po::bool_switch(&cfg.markend), "write a marker line just before completion");
 
     po::options_description system_desc{"System Options"};
@@ -364,7 +366,7 @@ int main(int argc, char** argv){
 
     while (kseq_read(kseq_rd) >= 0) {
         uint32_t seq_len = kseq_rd->seq.l;
-        std::string seq_name = std::string(kseq_rd->name.s, kseq_rd->name.l);
+        std::string seq_name = cfg.query_prefix + std::string(kseq_rd->name.s, kseq_rd->name.l);
         fprintf(block_name_file, "%s\n", seq_name.c_str());
 
         q_chr_name.push_back(seq_name);
@@ -522,7 +524,7 @@ int main(int argc, char** argv){
     block_name_file = fopen(("ref_block"+std::to_string(total_r_blocks)+".name").c_str(), "w");
     while (kseq_read(kseq_rd) >= 0) {
         uint32_t seq_len = kseq_rd->seq.l;
-        std::string seq_name = std::string(kseq_rd->name.s, kseq_rd->name.l);
+        std::string seq_name = cfg.target_prefix + std::string(kseq_rd->name.s, kseq_rd->name.l);
         fprintf(block_name_file, "%s\n", seq_name.c_str());
 
         r_chr_name.push_back(seq_name);

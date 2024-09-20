@@ -1,0 +1,36 @@
+--- a/kent/src/inc/common.mk	2024-09-20 12:47:59.873876212 -0400
++++ b/kent/src/inc/common.mk	2024-09-20 12:50:55.946858032 -0400
+@@ -21,7 +21,7 @@
+ endif
+ 
+ HG_DEFS=-D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE -D_GNU_SOURCE -DMACHTYPE_${MACHTYPE}
+-HG_INC+=-I../inc -I../../inc -I../../../inc -I../../../../inc -I../../../../../inc -I$(kentSrc)/htslib
++HG_INC+=-I../inc -I../../inc -I../../../inc -I../../../../inc -I../../../../../inc -I${kentSrc}/htslib -I${PREFIX}/include -I${BUILD_PREFIX}/include
+ 
+ # to check for Mac OSX Darwin specifics:
+ UNAME_S := $(shell uname -s)
+@@ -239,6 +239,8 @@
+ else
+    ifeq (${CONDA_BUILD},1)
+        L+=${PREFIX}/lib/libssl.a ${PREFIX}/lib/libcrypto.a -ldl
++       L+=${PREFIX}/lib/libssl.so ${PREFIX}/lib/libcrypto.so -ldl
++
+    else
+        ifneq (${SSLLIB},)
+           L+=${SSLLIB}
+--- a/kent/src/hg/lib/straw/makefile	2024-09-20 12:53:33.463735840 -0400
++++ b/kent/src/hg/lib/straw/makefile	2024-09-20 12:54:03.783904995 -0400
+@@ -1,4 +1,4 @@
+-KENT_INC=-I../../../inc
++KENT_INC=-I../../../inc -I${PREFIX}/include
+ 
+ straw: straw.o cStraw.o
+ 	ld -r -o ../straw.o straw.o cStraw.o
+--- a/kent/src/utils/expMatrixToBarchartBed/expMatrixToBarchartBed	2024-09-20 12:56:19.752664666 -0400
++++ b/kent/src/utils/expMatrixToBarchartBed/expMatrixToBarchartBed	2024-09-20 12:56:35.392752021 -0400
+@@ -1,4 +1,4 @@
+-#!/usr/bin/env python2.7
++#!/usr/bin/env python
+ # expMatrixToBarchartBed
+ """
+ Generate a barChart bed6+5 file from a matrix, meta data, and coordinates.
