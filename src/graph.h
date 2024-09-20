@@ -60,6 +60,8 @@ typedef struct Configuration {
     // Output parameters
     std::string output_format;
     std::string output;
+    std::string target_prefix;
+    std::string query_prefix;
     bool markend;
 
     // System parameters
