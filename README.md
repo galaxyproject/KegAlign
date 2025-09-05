@@ -156,7 +156,11 @@ Matrix can be supplied as an input to **--scoring** parameter. Substitution matr
 
 The default output is a MAF alignment file. Other formats can be selected with the **--format** parameter.  See [LASTZ manual](https://lastz.github.io/lastz/#formats) for description of possible formats.
 
+## License
+This project is released under the MIT License.  
+See the [LICENSE](LICENSE) file for details.
+
 ## <a name="cite_kegalign"></a> Citing KegAlign
 
-B Gulhan, R Burhans, R Harris, M Kandemir, M Haeussler, A Nekrutenko. [KegAlign: Optimizing pairwise alignments with diagonal partitioning](https://doi.org/10.1101/2024.09.02.610839). BIORXIV, 2024.  doi: 10.1101/2024.09.02.610839
+AB Gulhan, R Burhans, R Harris, M Kandemir, M Haeussler, A Nekrutenko. [KegAlign: Optimizing pairwise alignments with diagonal partitioning](https://doi.org/10.1101/2024.09.02.610839). BIORXIV, 2024.  doi: 10.1101/2024.09.02.610839
 
