@@ -1,4 +1,4 @@
-[license-badge]: https://img.shields.io/badge/License-MIT-yellow.svg 
+[license-badge]: https://img.shields.io/badge/License-MIT-yellow.svg
 [license-link]: https://opensource.org/licenses/MIT
 
 [![License][license-badge]][license-link]
@@ -6,7 +6,7 @@
 
 <img src="kegalign_logo.png" width="300">
 
-This is a [@galaxyproject](https://github.com/galaxyproject)'s modified fork of the original [SegAlign](https://github.com/gsneha26/SegAlign). 
+This is a [@galaxyproject](https://github.com/galaxyproject)'s modified fork of the original [SegAlign](https://github.com/gsneha26/SegAlign).
 
 ## Table of Contents
 
@@ -78,33 +78,84 @@ The following dependencies are required by KegAlign:
 
 ## <a name="alignment"></a> Alignment
 
-#### Running a Sample Alignment
+#### Computing a Sample Alignment
+
+##### Installing KegAlign
+
 ```bash
 # install kegalign
 git clone https://github.com/galaxyproject/KegAlign.git
 cd KegAlign
 ./scripts/make-conda-env.bash
 source ./conda-env.bash
+```
 
+###### Converting input sequences
+
+The first step is to convert the input sequences to [.2bit](https://genome.ucsc.edu/FAQ/FAQformat.html#format7), a compact randomly-accessible format.  These .2bit files are used later as input to LASTZ.
+
+```bash
 # convert target (ref) and query to 2bit
 mkdir work
 faToTwoBit <(gzip -cdfq ./test-data/apple.fasta.gz) work/ref.2bit
 faToTwoBit <(gzip -cdfq ./test-data/orange.fasta.gz) work/query.2bit
+```
 
+###### Generating LASTZ commands
+
+The second step, has two sub-steps. First, use KegAlign to generate a list of LASTZ commands to run. Second, adjust this list of LASTZ commands using our diagonal partitioning method. Two ways to complete this step are shown below.
+
+1) You can run the python scripts used by Galaxy to generate a keg (tarball) containing the LASTZ commands.
+
+```bash
 # generate LASTZ keg
 python ./scripts/runner.py --diagonal-partition --format maf- --num-cpu 16 --num-gpu 1 --output-file data_package.tgz --output-type tarball --tool_directory ./scripts test-data/apple.fasta.gz test-data/orange.fasta.gz
 python ./scripts/package_output.py --format_selector maf --tool_directory ./scripts
+```
 
-# run LASTZ keg
-python ./scripts/run_lastz_tarball.py --input=data_package.tgz --output=apple_orange.maf --parallel=16
+2) You can run KegAlign followed by our diagonal partitioning python script to generate the list of LASTZ commands.
 
-# check output
-diff apple_orange.maf <(gzip -cdfq ./test-data/apple_orange.maf.gz)
-
+```bash
 # command-line kegalign
 kegalign test-data/apple.fasta.gz test-data/orange.fasta.gz work/ --num_gpu 1 --num_threads 16 > lastz-commands.txt
+xargs -d "\n" -n 1 python ./scripts/diagonal_partition.py -1 < lastz-commands.txt > new-lastz-commands.txt
+mv new-lastz-commands.txt lastz-commands.txt
+```
+
+###### Computing the alignment
+
+The third step is to use LASTZ to compute the alignment.
+
+If you have a keg (tarball) from step 1 above, you can use the python script used by Galaxy to compute the alignment.
+
+```bash
+# run LASTZ keg
+python ./scripts/run_lastz_tarball.py --input=data_package.tgz --output=apple_orange.maf --parallel=16
+```
+
+If you have a list of LASTZ commands from step 2 above, you can compute the alignment.
+
+This runs the LASTZ commands serially.
+
+```bash
+# run LASTZ commands
 bash lastz-commands.txt
 (echo "##maf version=1"; cat *.maf-) > apple_orange.maf
+```
+
+This runs the LASTZ commands using GNU parallel:
+
+```bash
+# run LAST commands
+parallel --max-procs 16 < lastz-commands.txt
+(echo "##maf version=1"; cat *.maf-) > apple_orange.maf
+```
+
+###### Checking the output
+
+```bash
+# check output
+diff apple_orange.maf <(gzip -cdfq ./test-data/apple_orange.maf.gz)
 ```
 
 #### Running with MIG/MPS
