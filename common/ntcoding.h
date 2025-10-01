@@ -1,3 +1,5 @@
+#include <stdint.h>
+
 #define INVALID_KMER (1 << 31)
 #define GRAIN_SIZE (1 << 18)
 
