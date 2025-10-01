@@ -110,8 +110,8 @@ EOF
             "black" \
             "cmake" \
             "flake8" \
-            "gxx=11" \
-            "libboost-devel>=1.70" \
+            "gxx=13" \
+            "libboost-devel>=1.84" \
             "mypy" \
             "nvidia-ml-py" \
             "python=3.12" \
