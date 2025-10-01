@@ -60,48 +60,22 @@ uint32_t GetKmerIndexAtPos (char* sequence, size_t pos, uint32_t seed_size) {
     return kmer;
 }
 
+const char *rev_comp =
+    "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN"
+    "NNNNNN&NNNNNNNNNNNNNNNNNNNNNNNNN"
+    "NTVGHNNCDNNMNKNNNNYSAABWNRNNNNNN"
+    "NtvghnncdnnmnknnnnysaabwnrnNNNNN";
+
 void RevComp(char* dst_buffer, char* src_buffer, size_t rc_start, size_t start, size_t len){
 
     size_t r = rc_start;
     for (size_t i = start+len; i> start; i--) {
-        
-        switch (src_buffer[i-1]) {
-            case 'a': dst_buffer[r++] = 't';
-                      break;
-
-            case 'A': dst_buffer[r++] = 'T';
-                      break;
-
-            case 'c': dst_buffer[r++] = 'g';
-                      break;
-
-            case 'C': dst_buffer[r++] = 'G';
-                      break;
-
-            case 'g': dst_buffer[r++] = 'c';
-                      break;
-
-            case 'G': dst_buffer[r++] = 'C';
-                      break;
-
-            case 't': dst_buffer[r++] = 'a';
-                      break;
-
-            case 'T': dst_buffer[r++] = 'A';
-                      break;
-
-            case 'n': dst_buffer[r++] = 'n';
-                      break;
-
-            case 'N': dst_buffer[r++] = 'N';
-                      break;
-
-            case '&': dst_buffer[r++] = '&';
-                      break;
-
-            default: dst_buffer[r++] = 'n';
-                     fprintf(stderr, "Bad Nt char! '%c' %lu\n", src_buffer[i-1], i-1);
-
+        int rev_comp_index = static_cast<int>(src_buffer[i-1]);
+        if (rev_comp_index >= 0 && rev_comp_index <= 127) {
+            dst_buffer[r++] = rev_comp[rev_comp_index];
+        } else {
+            dst_buffer[r++] = 'N';
+            fprintf(stderr, "Bad Nt char! '%c' %lu\n", src_buffer[i-1], i-1);
         }
     }
 }

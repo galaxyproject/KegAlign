@@ -51,9 +51,21 @@ if [ ! -e "$miniforge_root" ]; then
     rm -f "$conda_root/$filename" "$conda_root/${filename}.sha256"
 fi
 
+
 if [ $dev -eq 0 ]; then
-    echo "source \"${miniforge_root}/etc/profile.d/conda.sh\"" > "$conda_env_file"
-    echo "source \"${miniforge_root}/etc/profile.d/mamba.sh\"" >> "$conda_env_file"
+cat > "$conda_env_file" << EOF
+source "$miniforge_root/etc/profile.d/conda.sh"
+export MAMBA_EXE="$miniforge_root/bin/mamba"
+export MAMBA_ROOT_PREFIX="$miniforge_root"
+__mamba_setup="\$("\$MAMBA_EXE" shell hook --shell bash --root-prefix "\$MAMBA_ROOT_PREFIX" 2> /dev/null)"
+if [ \$? -eq 0 ]; then
+    eval "\$__mamba_setup"
+else
+    alias mamba="\$MAMBA_EXE"  # Fallback on help from mamba activate
+fi
+unset __mamba_setup
+EOF
+
     source "$conda_env_file"
     echo "conda activate kegalign" >> "$conda_env_file"
 
@@ -63,15 +75,25 @@ if [ $dev -eq 0 ]; then
             --name kegalign \
             --channel conda-forge \
             --channel bioconda \
-            --channel defaults \
             --override-channels \
             --strict-channel-priority \
             --yes \
             "kegalign-full"
     fi
 elif [ $dev -eq 1 ]; then
-    echo "source \"${miniforge_root}/etc/profile.d/conda.sh\"" > "$conda_env_dev_file"
-    echo "source \"${miniforge_root}/etc/profile.d/mamba.sh\"" >> "$conda_env_dev_file"
+cat > "$conda_env_dev_file" << EOF
+source "$miniforge_root/etc/profile.d/conda.sh"
+export MAMBA_EXE="$miniforge_root/bin/mamba"
+export MAMBA_ROOT_PREFIX="$miniforge_root"
+__mamba_setup="\$("\$MAMBA_EXE" shell hook --shell bash --root-prefix "\$MAMBA_ROOT_PREFIX" 2> /dev/null)"
+if [ \$? -eq 0 ]; then
+    eval "\$__mamba_setup"
+else
+    alias mamba="\$MAMBA_EXE"  # Fallback on help from mamba activate
+fi
+unset __mamba_setup
+EOF
+
     source "$conda_env_dev_file"
     echo "conda activate kegalign-dev" >> "$conda_env_dev_file"
 
@@ -81,10 +103,10 @@ elif [ $dev -eq 1 ]; then
             --name kegalign-dev \
             --channel conda-forge \
             --channel bioconda \
-            --channel defaults \
             --override-channels \
             --strict-channel-priority \
             --yes \
+            "bashlex" \
             "black" \
             "cmake" \
             "flake8" \
