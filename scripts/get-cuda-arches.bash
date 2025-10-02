@@ -22,25 +22,25 @@ if [ "${cuda_compiler_version}" != "None" ]; then
 
     ARCHES=()
     if   [ $cuda_compiler_version_int -ge $(version2int "13.0") ]; then # 2025-08
-        ARCHES=( 75 80 86 87 89 90 90a 100 100a 100f 101 101a 101f 103 103a 103f 120 120a 120f 121 121a 121f)
+        ARCHES=(75 80 86 87 89 90 90a 100 100a 100f 101 101a 101f 103 103a 103f 120 120a 120f 121 121a 121f)
     elif [ $cuda_compiler_version_int -ge $(version2int "12.9") ]; then # 2025-05
         ARCHES=(50 52 53 60 61 62 70 72 75 80 86 87 89 90 90a 100 100a 100f 101 101a 101f 103 103a 103f 120 120a 120f 121 121a 121f)
     elif [ $cuda_compiler_version_int -ge $(version2int "12.8") ]; then # 2025-01
         ARCHES=(50 52 53 60 61 62 70 72 75 80 86 87 89 90 90a 100 100a 101 101a 120 120a)
     elif [ $cuda_compiler_version_int -ge $(version2int "12.6") ]; then # 2024-08
-        ARCHES=( 50 52 53 60 61 62 70 72 75 80 86 87 89 90 90a)
+        ARCHES=(50 52 53 60 61 62 70 72 75 80 86 87 89 90 90a)
     elif [ $cuda_compiler_version_int -ge $(version2int "11.8") ]; then # 2022-10
-        ARCHES=( 35 37 50 52 53 60 61 62 70 72 75 80 86 87 89 90)
+        ARCHES=(35 37 50 52 53 60 61 62 70 72 75 80 86 87 89 90)
     elif [ $cuda_compiler_version_int -ge $(version2int "11.7") ]; then # 2022-05
-        ARCHES=( 35 37 50 52 53 60 61 62 70 72 75 80 86 87)
+        ARCHES=(35 37 50 52 53 60 61 62 70 72 75 80 86 87)
     elif [ $cuda_compiler_version_int -ge $(version2int "11.4") ]; then # 2021-06
-        ARCHES=( 35 37 50 52 53 60 61 62 70 72 75 80 86)
+        ARCHES=(35 37 50 52 53 60 61 62 70 72 75 80 86)
     elif [ $cuda_compiler_version_int -ge $(version2int "11.1") ]; then # 2020-09
-        ARCHES=( 35 37 50 52 53 60 61 62 70 72 75 80)
+        ARCHES=(35 37 50 52 53 60 61 62 70 72 75 80)
     elif [ $cuda_compiler_version_int -ge $(version2int "10.0") ]; then # 2018-09
-        ARCHES=( 30 32 35 50 52 53 60 61 62 70 72 75)
+        ARCHES=(30 32 35 50 52 53 60 61 62 70 72 75)
     elif [ $cuda_compiler_version_int -ge $(version2int "9.0") ]; then # 2017-09
-        ARCHES=( 30 32 35 50 52 53 60 61 62 70)
+        ARCHES=(30 32 35 50 52 53 60 61 62 70)
     elif [ $cuda_compiler_version_int -ge $(version2int "8.0") ]; then # 2017-02
         ARCHES=(20 30 32 35 50 52 53)
     fi
