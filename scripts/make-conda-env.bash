@@ -111,7 +111,7 @@ EOF
             "cmake" \
             "flake8" \
             "gxx=13" \
-            "libboost-devel>=1.84" \
+            "libboost-devel>=1.88" \
             "mypy" \
             "nvidia-ml-py" \
             "python=3.12" \
