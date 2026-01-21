@@ -118,7 +118,7 @@ python ./scripts/package_output.py --format_selector maf --tool_directory ./scri
 ```bash
 # command-line kegalign
 kegalign test-data/apple.fasta.gz test-data/orange.fasta.gz work/ --num_gpu 1 --num_threads 16 > lastz-commands.txt
-xargs -I line -d "\n" -n 1 bash -c "python ./scripts/diagonal_partition.py -1 line" < lastz-commands.txt > new-lastz-commands.txt
+xargs -d "\n" -n 1 python ./scripts/diagonal_partition.py -1 < lastz-commands.txt > new-lastz-commands.txt
 mv new-lastz-commands.txt lastz-commands.txt
 ```
 
