@@ -16,6 +16,68 @@ import statistics
 import sys
 import typing
 
+import bashlex
+
+class nodevisitor(bashlex.ast.nodevisitor):  # type: ignore[misc]
+    def __init__(self, positions: typing.List[typing.Tuple[int, int]]) -> None:
+        self.positions = positions
+        self.stdin = None
+        self.stdout = None
+        self.stderr = None
+
+    def visitredirect(
+        self,
+        n: bashlex.ast.node,
+        n_input: int,
+        n_type: str,
+        output: typing.Any,
+        heredoc: typing.Any,
+    ) -> None:
+        if isinstance(n_input, int) and 0 <= n_input <= 2:
+            if isinstance(output, bashlex.ast.node) and output.kind == "word":
+                self.positions.append(n.pos)
+                if n_input == 0:
+                    self.stdin = output.word
+                elif n_input == 1:
+                    self.stdout = output.word
+                elif n_input == 2:
+                    self.stderr = output.word
+            else:
+                sys.exit(f"oops 1: {type(n_input)}")
+        else:
+            sys.exit(f"oops 2: {type(n_input)}")
+
+    def visitheredoc(self, n: bashlex.ast.node, value: typing.Any) -> None:
+        pass
+
+
+def parse_line(line: str) -> typing.Dict[str, typing.Any]:
+    # resolve shell redirects
+    trees: typing.List[typing.Any] = bashlex.parse(line, strictmode=False)
+    positions: typing.List[typing.Tuple[int, int]] = []
+
+    for tree in trees:
+        visitor = nodevisitor(positions)
+        visitor.visit(tree)
+
+    # do replacements from the end so the indicies will be correct
+    positions.reverse()
+
+    processed = list(line)
+    for start, end in positions:
+        processed[start:end] = ""
+
+    processed_line: str = "".join(processed)
+
+    command_dict = {
+        "line": processed_line,
+        "stdin": visitor.stdin,
+        "stdout": visitor.stdout,
+        "stderr": visitor.stderr
+    }
+
+    return command_dict
+
 
 def chunks(lst: tuple[str, ...], n: int) -> typing.Iterator[tuple[str, ...]]:
     """Yield successive n-sized chunks from list."""
@@ -41,6 +103,11 @@ if __name__ == "__main__":
     # first parameter contains chunk size
     chunk_size = int(sys.argv[1])
     params = sys.argv[2:]
+    if len(params) == 1:
+        command_dict = parse_line(params[0])
+        params = list(bashlex.split(command_dict["line"]))
+        if command_dict["stderr"] is not None:
+            params.extend(["2>", command_dict["stderr"]])
 
     # don't do anything if 0 chunk size
     if chunk_size == 0:
