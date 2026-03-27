@@ -112,7 +112,8 @@ int main(int argc, char** argv){
         ("nogapped", po::bool_switch(&cfg.gapped)->default_value(false), "don't perform gapped extension stage")
         ("ydrop", po::value<int>(&cfg.ydrop)->default_value(9430), "y-drop value for gapped extension")
         ("gappedthresh", po::value<int>(&cfg.gappedthresh), "score threshold for gapped alignments")
-        ("notrivial", po::bool_switch(&cfg.notrivial)->default_value(false), "Don't output a trivial self-alignment block if the target and query sequences are identical");
+        ("notrivial", po::bool_switch(&cfg.notrivial)->default_value(false), "Don't output a trivial self-alignment block if the target and query sequences are identical")
+        ("inner", po::value<int>(&cfg.inner)->default_value(-1), "search for alignments within each HSP after first doing gapfree extension (passed to LASTZ; -1 means disabled)");
 
     po::options_description output_desc{"Output Options"};
     output_desc.add_options()
@@ -202,7 +203,7 @@ int main(int argc, char** argv){
         int seed_len = cfg.seed_shape.size();
         cfg.seed.shape = cfg.seed_shape;
         for(int i = 0; i< seed_len; i++){
-            if(cfg.seed_shape[i] == '1')
+            if(cfg.seed_shape[i] == '1' || cfg.seed_shape[i] == 'T')
                 cfg.seed.shape[i] = 'T';
             else
                 cfg.seed.shape[i] = '0';

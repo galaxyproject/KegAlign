@@ -37,7 +37,7 @@ class LastzCommands:
 
 
 class LastzCommand:
-    lastz_command_regex = re.compile(r"lastz (.+?)?ref\.2bit\[nameparse=darkspace\]\[multiple\]\[subset=ref_block(\d+)\.name\] (.+?)?query\.2bit\[nameparse=darkspace\]\[subset=query_block(\d+)\.name] --format=(\S+) --ydrop=(\d+) --gappedthresh=(\d+) --strand=(minus|plus)(?: --ambiguous=(\S+))?(?: --(notrivial))?(?: --scores=(\S+))? --segments=tmp(\d+)\.block(\d+)\.r(\d+)\.(minus|plus)(?:\.split(\d+))?\.segments --output=tmp(\d+)\.block(\d+)\.r(\d+)\.(minus|plus)(?:\.split(\d+))?\.(\S+) 2> tmp(\d+)\.block(\d+)\.r(\d+)\.(minus|plus)(?:\.split(\d+))?\.err")
+    lastz_command_regex = re.compile(r"lastz (.+?)?ref\.2bit\[nameparse=darkspace\]\[multiple\]\[subset=ref_block(\d+)\.name\] (.+?)?query\.2bit\[nameparse=darkspace\]\[subset=query_block(\d+)\.name] --format=(\S+) --ydrop=(\d+) --gappedthresh=(\d+) --strand=(minus|plus)(?: --ambiguous=(\S+))?(?: --(notrivial))?(?: --scores=(\S+))?(?: --inner=(\d+))? --segments=tmp(\d+)\.block(\d+)\.r(\d+)\.(minus|plus)(?:\.split(\d+))?\.segments --output=tmp(\d+)\.block(\d+)\.r(\d+)\.(minus|plus)(?:\.split(\d+))?\.(\S+) 2> tmp(\d+)\.block(\d+)\.r(\d+)\.(minus|plus)(?:\.split(\d+))?\.err")
 
     def __init__(self, line: str) -> None:
         self.line = line
@@ -54,6 +54,7 @@ class LastzCommand:
         self.ambiguous: bool = False
         self.nontrivial: bool = False
         self.scoring: str | None = None
+        self.inner: int | None = None
         self.segments_filename: str = ''
         self.output_filename: str = ''
         self.error_filename: str = ''
@@ -106,10 +107,15 @@ class LastzCommand:
             self.scoring = scoring
             self.args.append(f"--scoring={scoring}")
 
-        tmp_no = int(match.group(12))
-        block_no = int(match.group(13))
-        r_no = int(match.group(14))
-        split = match.group(16)
+        inner = match.group(12)
+        if inner is not None:
+            self.inner = int(inner)
+            self.args.append(f"--inner={inner}")
+
+        tmp_no = int(match.group(13))
+        block_no = int(match.group(14))
+        r_no = int(match.group(15))
+        split = match.group(17)
 
         base_filename = f"tmp{tmp_no}.block{block_no}.r{r_no}.{strand}"
 
