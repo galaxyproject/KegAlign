@@ -56,6 +56,7 @@ typedef struct Configuration {
     int ydrop;
     int gappedthresh;
     bool notrivial;
+    int inner;
 
     // Output parameters
     std::string output_format;

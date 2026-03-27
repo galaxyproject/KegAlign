@@ -29,6 +29,8 @@ if [ "${cuda_compiler_version}" != "None" ]; then
         ARCHES=(50 52 53 60 61 62 70 72 75 80 86 87 89 90 90a 100 100a 101 101a 120 120a)
     elif [ $cuda_compiler_version_int -ge $(version2int "12.6") ]; then # 2024-08
         ARCHES=(50 52 53 60 61 62 70 72 75 80 86 87 89 90 90a)
+    elif [ $cuda_compiler_version_int -ge $(version2int "12.0") ]; then # 2022-11 (dropped sm_35/37)
+        ARCHES=(50 52 53 60 61 62 70 72 75 80 86 87 89 90)
     elif [ $cuda_compiler_version_int -ge $(version2int "11.8") ]; then # 2022-10
         ARCHES=(35 37 50 52 53 60 61 62 70 72 75 80 86 87 89 90)
     elif [ $cuda_compiler_version_int -ge $(version2int "11.7") ]; then # 2022-05
