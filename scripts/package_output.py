@@ -255,17 +255,19 @@ class bashCommandLineFile:
         return command_dict
 
     def _write_format(self) -> None:
-        if self.args.format_selector == "bam":
-            format_name = "bam"
-        elif self.args.format_selector == "maf":
-            format_name = "maf"
-        elif self.args.format_selector == "differences":
-            format_name = "interval"
-        else:
-            format_name = "tabular"
+        """Record the LASTZ output format in the tarball, for run_lastz_tarball.py.
 
+        ⚠ THE LASTZ FORMAT ITSELF, NOT A NAME DERIVED FROM IT. run_lastz_tarball.py reads this value
+        and maps it to an output datatype, and its table is keyed on lastz's own format names --
+        `sam-`, `maf+`, `lav+text`, `axt+`. This function used to map first and write the result, so
+        it emitted `interval` and `tabular`, which that table has no entries for. Only `bam` and
+        `maf` survived the round trip; `axt`, `lav` and `differences` were all mislabelled, silently,
+        because the reader falls back to `tabular` for anything it does not recognise.
+
+        Mapping belongs at the reading end, which is the end that knows what the names mean.
+        """
         with open("format.txt", "w") as ofh:
-            print(f"{format_name}", file=ofh)
+            print(f"{self.args.output_format}", file=ofh)
 
         self.package_file.add_format("format.txt")
 
@@ -306,7 +308,7 @@ class nodevisitor(bashlex.ast.nodevisitor):  # type: ignore[misc]
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tool_directory", type=str, required=True, help="tool directory")
-    parser.add_argument("--format_selector", type=str, required=True, help="format selector")
+    parser.add_argument("--output_format", type=str, required=True, help="lastz output format")
     parser.add_argument("--debug", action="store_true", help="enable debug messages")
     args = parser.parse_args()
 

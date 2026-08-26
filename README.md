@@ -110,7 +110,7 @@ The second step, has two sub-steps. First, use KegAlign to generate a list of LA
 ```bash
 # generate LASTZ keg
 python ./scripts/runner.py --diagonal-partition --format maf- --num-cpu 16 --num-gpu 1 --output-file data_package.tgz --output-type tarball --tool_directory ./scripts test-data/apple.fasta.gz test-data/orange.fasta.gz
-python ./scripts/package_output.py --format_selector maf --tool_directory ./scripts
+python ./scripts/package_output.py --output_format maf- --tool_directory ./scripts
 ```
 
 2) You can run KegAlign followed by our diagonal partitioning python script to generate the list of LASTZ commands.
