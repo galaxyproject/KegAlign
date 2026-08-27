@@ -1,7 +1,32 @@
 #!/usr/bin/env bash
+#
+# Emit a CMAKE_CUDA_ARCHITECTURES value covering every GPU this nvcc can target.
+#
+# ASK NVCC, DO NOT MAINTAIN A TABLE. `nvcc --list-gpu-code` reports the architectures the compiler
+# in front of us actually supports, so the list cannot go stale, and it is right on the day a new
+# CUDA release lands rather than whenever somebody notices.
+#
+# The table this replaced was transcribed from NVIDIA's documentation, and it drifted exactly the way
+# transcriptions do. Its CUDA 13.0 row was the 12.9 row with the pre-Turing entries trimmed off the
+# front: it still listed 101/101a/101f, which 13.0 REMOVED, and never gained 88 or 110/110a/110f,
+# which 13.0 ADDED. A build against 13.0 therefore asked for an architecture that no longer exists.
+# The failure surfaced only on the next CUDA upgrade, which is the worst time to discover it.
+#
+# ⚠ ARCHITECTURE-SPECIFIC TARGETS ARE DELIBERATELY NOT BUILT. `--list-gpu-code` reports only the
+# "non-architecture-specific" architectures -- sm_100, never sm_100a or sm_100f. That is what we
+# want: the `a` and `f` variants exist for code using architecture-specific instructions, and
+# KegAlign's kernels use none (no __CUDA_ARCH__ guards, no wgmma/tcgen05, no cluster APIs). Building
+# them would triple the compile time and the fatbinary for identical generic code and zero extra
+# device coverage, since sm_100 runs on every SM 10.0 device. If a kernel ever does use such an
+# instruction, add that one target here for that stated reason -- nvcc will not enumerate them.
+#
+# The highest architecture is emitted WITHOUT `-real`, so its PTX is embedded and can be JIT-compiled
+# for GPUs newer than this toolkit knows about. Every other architecture is `-real`: SASS only, no
+# redundant PTX.
 
 set -o errexit
 set -o nounset
+set -o pipefail
 
 # in case cuda_compiler_version isn't already set
 if [ -z ${cuda_compiler_version+x} ]; then
@@ -13,46 +38,32 @@ if [ -z ${cuda_compiler_version+x} ]; then
     cuda_compiler_version=$(nvcc --version | sed -n 's/^.*release \([0-9]\+\.[0-9]\+\).*$/\1/p')
 fi
 
-# function to facilitate version comparison; cf. https://stackoverflow.com/a/37939589
-version2int () { echo "$@" | awk -F. '{ printf("%d%02d\n", $1, $2); }'; }
-
 declare -a CUDA_CONFIG_ARGS
 if [ "${cuda_compiler_version}" != "None" ]; then
-    cuda_compiler_version_int=$(version2int "$cuda_compiler_version")
+    type -p nvcc &> /dev/null || {
+        >&2 echo "error: unable to find nvcc command"
+        exit 1
+    }
 
-    ARCHES=()
-    if   [ $cuda_compiler_version_int -ge $(version2int "13.0") ]; then # 2025-08
-        ARCHES=(75 80 86 87 89 90 90a 100 100a 100f 101 101a 101f 103 103a 103f 120 120a 120f 121 121a 121f)
-    elif [ $cuda_compiler_version_int -ge $(version2int "12.9") ]; then # 2025-05
-        ARCHES=(50 52 53 60 61 62 70 72 75 80 86 87 89 90 90a 100 100a 100f 101 101a 101f 103 103a 103f 120 120a 120f 121 121a 121f)
-    elif [ $cuda_compiler_version_int -ge $(version2int "12.8") ]; then # 2025-01
-        ARCHES=(50 52 53 60 61 62 70 72 75 80 86 87 89 90 90a 100 100a 101 101a 120 120a)
-    elif [ $cuda_compiler_version_int -ge $(version2int "12.6") ]; then # 2024-08
-        ARCHES=(50 52 53 60 61 62 70 72 75 80 86 87 89 90 90a)
-    elif [ $cuda_compiler_version_int -ge $(version2int "11.8") ]; then # 2022-10
-        ARCHES=(35 37 50 52 53 60 61 62 70 72 75 80 86 87 89 90)
-    elif [ $cuda_compiler_version_int -ge $(version2int "11.7") ]; then # 2022-05
-        ARCHES=(35 37 50 52 53 60 61 62 70 72 75 80 86 87)
-    elif [ $cuda_compiler_version_int -ge $(version2int "11.4") ]; then # 2021-06
-        ARCHES=(35 37 50 52 53 60 61 62 70 72 75 80 86)
-    elif [ $cuda_compiler_version_int -ge $(version2int "11.1") ]; then # 2020-09
-        ARCHES=(35 37 50 52 53 60 61 62 70 72 75 80)
-    elif [ $cuda_compiler_version_int -ge $(version2int "10.0") ]; then # 2018-09
-        ARCHES=(30 32 35 50 52 53 60 61 62 70 72 75)
-    elif [ $cuda_compiler_version_int -ge $(version2int "9.0") ]; then # 2017-09
-        ARCHES=(30 32 35 50 52 53 60 61 62 70)
-    elif [ $cuda_compiler_version_int -ge $(version2int "8.0") ]; then # 2017-02
-        ARCHES=(20 30 32 35 50 52 53)
+    # sm_75 sm_80 sm_86 ... -> 75 80 86 ...
+    declare -a ARCHES
+    mapfile -t ARCHES < <(nvcc --list-gpu-code | sed -n 's/^sm_\([0-9]\+\)$/\1/p' | sort -n -u)
+
+    if [ ${#ARCHES[@]} -eq 0 ]; then
+        >&2 echo "error: nvcc --list-gpu-code reported no usable architectures"
+        >&2 echo "       cuda_compiler_version=${cuda_compiler_version}"
+        exit 1
     fi
 
     LATEST_ARCH="${ARCHES[-1]}"
     unset "ARCHES[${#ARCHES[@]}-1]"
 
-    for arch in "${ARCHES[@]}"; do
-        CMAKE_CUDA_ARCHS="${CMAKE_CUDA_ARCHS+${CMAKE_CUDA_ARCHS};}${arch}-real"
+    CMAKE_CUDA_ARCHS=""
+    for arch in ${ARCHES[@]+"${ARCHES[@]}"}; do
+        CMAKE_CUDA_ARCHS="${CMAKE_CUDA_ARCHS:+${CMAKE_CUDA_ARCHS};}${arch}-real"
     done
 
-    CMAKE_CUDA_ARCHS="${CMAKE_CUDA_ARCHS+${CMAKE_CUDA_ARCHS};}${LATEST_ARCH}"
+    CMAKE_CUDA_ARCHS="${CMAKE_CUDA_ARCHS:+${CMAKE_CUDA_ARCHS};}${LATEST_ARCH}"
 
     CUDA_CONFIG_ARGS+=(
         "${CMAKE_CUDA_ARCHS}"
