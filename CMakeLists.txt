@@ -1,9 +1,10 @@
 cmake_minimum_required (VERSION 3.10)
 
 # if(POLICY ...) around each of these, because cmake_policy(SET ...) on a policy
-# the running CMake has never heard of is an error. That -- not the floor -- is
-# what these lines actually require, and guarding them is the idiomatic way to
-# say so.
+# the running CMake has never heard of is an error. Guarding them is what lets
+# this file name a low floor and still ask for NEW behaviour where it is
+# available -- raising cmake_minimum_required is not the way to do that, and
+# doing so once changed which CUDA architectures this build used.
 if(POLICY CMP0104)
     cmake_policy(SET CMP0104 NEW)   # CMake 3.18
 endif()
@@ -17,8 +18,9 @@ if(POLICY CMP0167)
     cmake_policy(SET CMP0167 NEW)   # CMake 3.30
 endif()
 
-execute_process(COMMAND bash "-c" "${CMAKE_SOURCE_DIR}/scripts/get-cuda-arches.bash" OUTPUT_VARIABLE KEGALIGN_CUDA_ARCHITECTURES)
-set(CMAKE_CUDA_ARCHITECTURES "${KEGALIGN_CUDA_ARCHITECTURES}")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
+include(SelectCudaArchitectures)
+kegalign_select_cuda_architectures(CMAKE_CUDA_ARCHITECTURES)
 
 project(kegalign LANGUAGES C CXX CUDA)
 
