@@ -1,4 +1,6 @@
-cmake_minimum_required (VERSION 3.10)
+# 3.30, not 3.10: CMP0167 below is a 3.30 policy and cmake_policy(SET ...) is an ERROR on a CMake
+# that does not know it, so 3.30 has been the real floor for as long as that line has been here.
+cmake_minimum_required (VERSION 3.30)
 cmake_policy(SET CMP0104 NEW)   # CMake 3.18
 cmake_policy(SET CMP0128 NEW)   # CMake 3.22
 cmake_policy(SET CMP0146 NEW)   # CMake 3.27
@@ -14,7 +16,7 @@ set(CMAKE_CUDA_COMPILER nvcc)
 set(CMAKE_CUDA_COMPILER_ENV_VAR "CUDACXX")
 set(CMAKE_CUDA_HOST_COMPILER_ENV_VAR "CUDAHOSTCXX")
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O4 -std=c++14 -l c -lboost_program_options")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O4 -std=c++17 -l c -lboost_program_options")
 
 find_package(TBB REQUIRED tbbmalloc tbbmalloc_proxy tbb_preview)
 
@@ -46,7 +48,11 @@ set_target_properties(
     kegalign 
     PROPERTIES 
       CUDA_SEPARABLE_COMPILATION ON
-      CUDA_STANDARD 14
+      # CUDA 13 bundles a CCCL whose Thrust, CUB and libcu++ headers all refuse to compile below
+      # C++17. REQUIRED so a toolchain that cannot provide it fails here rather than quietly
+      # dropping to an older standard and failing later inside those headers.
+      CUDA_STANDARD 17
+      CUDA_STANDARD_REQUIRED ON
       )
 
 target_compile_options(kegalign PRIVATE -DTBB_SUPPRESS_DEPRECATED_MESSAGES)
