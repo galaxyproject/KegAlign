@@ -1,10 +1,21 @@
-# 3.30, not 3.10: CMP0167 below is a 3.30 policy and cmake_policy(SET ...) is an ERROR on a CMake
-# that does not know it, so 3.30 has been the real floor for as long as that line has been here.
-cmake_minimum_required (VERSION 3.30)
-cmake_policy(SET CMP0104 NEW)   # CMake 3.18
-cmake_policy(SET CMP0128 NEW)   # CMake 3.22
-cmake_policy(SET CMP0146 NEW)   # CMake 3.27
-cmake_policy(SET CMP0167 NEW)   # CMake 3.30
+cmake_minimum_required (VERSION 3.10)
+
+# if(POLICY ...) around each of these, because cmake_policy(SET ...) on a policy
+# the running CMake has never heard of is an error. That -- not the floor -- is
+# what these lines actually require, and guarding them is the idiomatic way to
+# say so.
+if(POLICY CMP0104)
+    cmake_policy(SET CMP0104 NEW)   # CMake 3.18
+endif()
+if(POLICY CMP0128)
+    cmake_policy(SET CMP0128 NEW)   # CMake 3.22
+endif()
+if(POLICY CMP0146)
+    cmake_policy(SET CMP0146 NEW)   # CMake 3.27
+endif()
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)   # CMake 3.30
+endif()
 
 execute_process(COMMAND bash "-c" "${CMAKE_SOURCE_DIR}/scripts/get-cuda-arches.bash" OUTPUT_VARIABLE KEGALIGN_CUDA_ARCHITECTURES)
 set(CMAKE_CUDA_ARCHITECTURES "${KEGALIGN_CUDA_ARCHITECTURES}")
