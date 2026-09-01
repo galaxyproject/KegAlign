@@ -1,4 +1,4 @@
-#define VERSION "v0.1.2.8"
+#define VERSION "v0.2.2.14"
 
 #define TRANSITION_MASK 2
 #define NUC 8 
