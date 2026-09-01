@@ -242,64 +242,11 @@ int main(int argc, char** argv){
                                    { -123,  -31, -114,   91}};
 
     if(vm.count("scoring")) {
-        load_scoring_matrix(tmp_sub_mat, (char *) cfg.scoring_file.c_str());
+        load_scoring_matrix(tmp_sub_mat, &bad_score, &fill_score, (char *) cfg.scoring_file.c_str());
     }
 
-        for(int i = 0; i < L_NT; i++){
-            for(int j = 0; j < L_NT; j++){
-                cfg.sub_mat[i*NUC+j] = tmp_sub_mat[i][j];
-            }
-        }
-
-        //lower case characters
-        for(int i = 0; i < L_NT; i++){
-            cfg.sub_mat[i*NUC+L_NT] = bad_score;
-            cfg.sub_mat[L_NT*NUC+i] = bad_score;
-        }
-        cfg.sub_mat[L_NT*NUC+L_NT] = bad_score;
-
-        //N
-        if(ambiguous_field == "n" || ambiguous_field == "iupac"){
-            for(int i = 0; i < N_NT; i++){
-                cfg.sub_mat[i*NUC+N_NT] = ambiguous_penalty;
-                cfg.sub_mat[N_NT*NUC+i] = ambiguous_penalty;
-            }
-            cfg.sub_mat[N_NT*NUC+N_NT] = ambiguous_reward;
-        }
-        else{
-            for(int i = 0; i < N_NT; i++){
-                cfg.sub_mat[i*NUC+N_NT] = bad_score;
-                cfg.sub_mat[N_NT*NUC+i] = bad_score;
-            }
-            cfg.sub_mat[N_NT*NUC+N_NT] = bad_score;
-        }
-
-        //other IUPAC
-        if(ambiguous_field == "iupac"){
-            for(int i = 0; i < X_NT; i++){
-                cfg.sub_mat[i*NUC+X_NT] = ambiguous_penalty;
-                cfg.sub_mat[X_NT*NUC+i] = ambiguous_penalty;
-            }
-            cfg.sub_mat[X_NT*NUC+X_NT] = ambiguous_reward;
-        }
-        else{
-            for(int i = 0; i < L_NT; i++){
-                cfg.sub_mat[i*NUC+X_NT] = fill_score;
-                cfg.sub_mat[X_NT*NUC+i] = fill_score;
-            }
-
-            for(int i = L_NT; i < X_NT; i++){
-                cfg.sub_mat[i*NUC+X_NT] = bad_score;
-                cfg.sub_mat[X_NT*NUC+i] = bad_score;
-            }
-            cfg.sub_mat[X_NT*NUC+X_NT] = fill_score;
-        }
-
-        for(int i = 0; i < E_NT; i++){
-            cfg.sub_mat[i*NUC+E_NT] = -10*cfg.xdrop;
-            cfg.sub_mat[E_NT*NUC+i] = -10*cfg.xdrop;
-        }
-        cfg.sub_mat[E_NT*NUC+E_NT] = -10*cfg.xdrop;
+    build_substitution_matrix(cfg.sub_mat, tmp_sub_mat, bad_score, fill_score,
+                              ambiguous_field.c_str(), ambiguous_reward, ambiguous_penalty, cfg.xdrop);
 
     tbb::global_control global_limit(tbb::global_control::max_allowed_parallelism, cfg.num_threads);
 
