@@ -1,0 +1,43 @@
+# Host-side checks only.
+#
+# Every suite here is deliberately buildable without a CUDA toolkit and without
+# a GPU, so it runs on a stock runner. The CUDA build itself is NOT attempted:
+# it needs nvcc and, to be worth anything, a GPU to run against. Those stay a
+# manual step before a release.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Host-side tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Seed buffer capacity follows the seed pattern
+        run: bash tests/test_seed_capacity.bash
+
+      - name: LASTZ scoring file is read in full
+        run: bash tests/test_scoring.bash
+
+      - name: CUDA architecture selection
+        run: cmake -P tests/test_cuda_architectures.cmake
+
+  version:
+    name: VERSION matches the tag
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: common/parameters.h agrees with the tag being released
+        run: bash tests/check_version.bash "${GITHUB_REF_NAME}"
