@@ -6,6 +6,7 @@
 int shape_pos[32];
 int shape_size;
 int transition_pos[32];
+int num_transitions;
 
 inline uint32_t NtChar2Int (char nt) {
     switch(nt) {
@@ -20,12 +21,14 @@ inline uint32_t NtChar2Int (char nt) {
 
 int GenerateShapePos (std::string shape) {
     shape_size = 0;
+    num_transitions = 0;
     int j = 0;
     for (int i = 0; i < shape.length(); i++) {
         if ((shape[i] == '1') || (shape[i] == 'T')) {
             shape_pos[shape_size++] = i;
             if (shape[i] == 'T') {
                 transition_pos[j] = 1;
+                num_transitions++;
             }
             else {
                 transition_pos[j] = 0;
@@ -38,6 +41,12 @@ int GenerateShapePos (std::string shape) {
 
 int IsTransitionAtPos(int t) {
     return transition_pos[t];
+}
+
+// How many positions in the current seed pattern allow a transition.  This is
+// what bounds the size of a seed_offset_vector, so MaxSeedsPerChunk() needs it.
+int GetNumTransitions() {
+    return num_transitions;
 }
 
 uint32_t GetKmerIndexAtPos (char* sequence, size_t pos, uint32_t seed_size) {

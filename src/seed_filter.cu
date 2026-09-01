@@ -5,8 +5,10 @@
 #include <thrust/scan.h>
 #include <thrust/unique.h>
 #include <thrust/sort.h>
+#include <stdlib.h>
 #include "cuda_utils.h"
 #include "parameters.h"
+#include "seed_capacity.h"
 #include "seed_filter.h"
 #include "seed_filter_interface.h"
 #include "store.h"
@@ -18,7 +20,7 @@
 
 #define MAX_HITS_PER_GB 4194304
 
-int MAX_SEEDS;
+int64_t MAX_SEEDS;
 int MAX_HITS;
 
 uint32_t seed_size;
@@ -686,7 +688,12 @@ std::vector<segmentPair> SeedAndFilter (std::vector<uint64_t> seed_offset_vector
     uint32_t total_anchors = 0;
 
     uint32_t num_seeds = seed_offset_vector.size();
-    assert(num_seeds <= MAX_SEEDS);
+    // Not an assert: Release builds define NDEBUG and delete it, which is how a
+    // buffer overrun reached cudaMemcpy() as a bare " invalid argument " instead.
+    if (num_seeds > (uint64_t) MAX_SEEDS) {
+        fprintf(stderr, "Error: %u seeds in one chunk exceeds the seed buffer capacity of %ld\n", num_seeds, MAX_SEEDS);
+        exit(15);
+    }
 
     uint64_t* tmp_offset = (uint64_t*) malloc(num_seeds*sizeof(uint64_t));
     for (uint32_t i = 0; i < num_seeds; i++) {
@@ -808,16 +815,13 @@ std::vector<segmentPair> SeedAndFilter (std::vector<uint64_t> seed_offset_vector
     return gpu_filter_output;
 }
 
-void InitializeProcessor (bool transition, uint32_t WGA_CHUNK, uint32_t input_seed_size, int* sub_mat, int input_xdrop, int input_hspthresh, bool input_noentropy){
+void InitializeProcessor (bool transition, uint32_t num_transitions, uint32_t WGA_CHUNK, uint32_t input_seed_size, int* sub_mat, int input_xdrop, int input_hspthresh, bool input_noentropy){
 
     cudaDeviceProp deviceProp;
     cudaGetDeviceProperties(&deviceProp, 0);
     float global_mem_gb = static_cast<float>(deviceProp.totalGlobalMem / 1073741824.0f);
 
-    if(transition)
-        MAX_SEEDS = 13*WGA_CHUNK;
-    else
-        MAX_SEEDS = WGA_CHUNK;
+    MAX_SEEDS = MaxSeedsPerChunk(transition, num_transitions, WGA_CHUNK);
 
     MAX_HITS = MAX_HITS_PER_GB*global_mem_gb;
 
