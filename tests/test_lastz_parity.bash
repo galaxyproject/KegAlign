@@ -42,18 +42,38 @@
 # is 0-based half-open while start* is 1-based closed; KegAlign writes 1-based.
 #
 # The defaults are the repo's own test-data: 31 sequences, ~372 kb and ~377 kb,
-# which fit in ONE sequence block (default seq_block_size is 500 Mb). That matters.
-# KegAlign separates blocks with '&' and will not extend an HSP across one, while
-# LASTZ has no such boundary, so on a multi-block input some disagreement near
-# every block edge is EXPECTED and is not a parity defect.
+# which fit in ONE sequence block (default seq_block_size is 500 Mb).
+#
+# An earlier version of this comment claimed multi-block input would disagree
+# "because LASTZ has no such boundary". That was WRONG and is corrected here,
+# because it would license dismissing a real defect as expected noise. KegAlign's
+# '&' separators are only ever placed BETWEEN WHOLE FASTA RECORDS -- the block-size
+# test and the memset both run after a complete kseq record is appended
+# (main.cpp:338-390, and :494-509 for the reference) -- and LASTZ does not extend
+# an alignment across a record boundary either. Multi-block input is simply
+# UNTESTED here. Treat a genome-scale disagreement as a finding, not as expected.
+#
+# PARAMETERS are overridable from the environment, so an extra case needs no edit
+# and no copy of this script:
+#
+#     STEP=2 bash tests/test_lastz_parity.bash
+#     SEED=14of22 bash tests/test_lastz_parity.bash
+#
+# (Copying this file elsewhere and running it does NOT work: it locates test-data
+# relative to its own path.)
 set -o errexit -o nounset -o pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-# Held identical across both tools: KegAlign's defaults, spelled out.
-SEED=12of19 ; XDROP=910 ; HSPTHRESH=3000 ; STEP=1
+# Held identical across both tools: KegAlign's defaults, spelled out. Each can be
+# overridden from the environment to run this pair at another point in parameter
+# space; whatever is set here is passed to BOTH tools, which is the whole point.
+SEED="${SEED:-12of19}"
+XDROP="${XDROP:-910}"
+HSPTHRESH="${HSPTHRESH:-3000}"
+STEP="${STEP:-1}"
 
 need() { command -v "$1" >/dev/null || { echo "SKIP: $1 not on PATH"; exit 77; }; }
 need kegalign
@@ -157,6 +177,11 @@ run_case() {
         echo "ok - $label: KegAlign and LASTZ agree exactly, no duplicates"
     fi
 }
+
+# Print what was actually run. With the parameters overridable, a bare "1207 = 1207"
+# in a paste is unattributable -- and a result whose provenance is lost is a result
+# that gets attached to the wrong run later.
+printf 'seed=%s xdrop=%s hspthresh=%s step=%s\n' "$SEED" "$XDROP" "$HSPTHRESH" "$STEP"
 
 run_case unmasked "$tmp/target.fa"        "$tmp/query.fa"
 run_case masked   "$tmp/target.masked.fa" "$tmp/query.masked.fa"

@@ -63,7 +63,7 @@ uint32_t GetKmerIndexAtPos (char* sequence, size_t pos, uint32_t seed_size) {
 
     uint32_t nt[MAX_SEED_SPAN];
 
-    for(int i = 0; i < seed_size; i++){
+    for(uint32_t i = 0; i < seed_size; i++){
         nt[i] = NtChar2Int(sequence[pos+i]);
         if (nt[i] == N_NT) {
             return INVALID_KMER;
