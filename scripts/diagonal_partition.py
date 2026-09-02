@@ -18,8 +18,9 @@ import typing
 
 import bashlex
 
+
 class nodevisitor(bashlex.ast.nodevisitor):  # type: ignore[misc]
-    def __init__(self, positions: typing.List[typing.Tuple[int, int]]) -> None:
+    def __init__(self, positions: list[tuple[int, int]]) -> None:
         self.positions = positions
         self.stdin = None
         self.stdout = None
@@ -51,10 +52,10 @@ class nodevisitor(bashlex.ast.nodevisitor):  # type: ignore[misc]
         pass
 
 
-def parse_line(line: str) -> typing.Dict[str, typing.Any]:
+def parse_line(line: str) -> dict[str, typing.Any]:
     # resolve shell redirects
-    trees: typing.List[typing.Any] = bashlex.parse(line, strictmode=False)
-    positions: typing.List[typing.Tuple[int, int]] = []
+    trees: list[typing.Any] = bashlex.parse(line, strictmode=False)
+    positions: list[tuple[int, int]] = []
 
     for tree in trees:
         visitor = nodevisitor(positions)
@@ -69,12 +70,7 @@ def parse_line(line: str) -> typing.Dict[str, typing.Any]:
 
     processed_line: str = "".join(processed)
 
-    command_dict = {
-        "line": processed_line,
-        "stdin": visitor.stdin,
-        "stdout": visitor.stdout,
-        "stderr": visitor.stderr
-    }
+    command_dict = {"line": processed_line, "stdin": visitor.stdin, "stdout": visitor.stdout, "stderr": visitor.stderr}
 
     return command_dict
 
@@ -82,7 +78,7 @@ def parse_line(line: str) -> typing.Dict[str, typing.Any]:
 def chunks(lst: tuple[str, ...], n: int) -> typing.Iterator[tuple[str, ...]]:
     """Yield successive n-sized chunks from list."""
     for i in range(0, len(lst), n):
-        yield lst[i:i + n]
+        yield lst[i : i + n]
 
 
 if __name__ == "__main__":
@@ -120,9 +116,9 @@ if __name__ == "__main__":
     input_file = None
 
     for index, value in enumerate(params):
-        if value[:len(segment_key)] == segment_key:
+        if value[: len(segment_key)] == segment_key:
             segment_index = index
-            input_file = value[len(segment_key):]
+            input_file = value[len(segment_key) :]
             break
 
     if segment_index is None:
@@ -137,7 +133,7 @@ if __name__ == "__main__":
     # each char is 1 byte
     line_size = None
     file_size = os.path.getsize(input_file)
-    with open(input_file, "r") as f:
+    with open(input_file) as f:
         # add 1 for newline
         line_size = len(f.readline())
 
@@ -158,7 +154,7 @@ if __name__ == "__main__":
             # if not enough segment files for estimation, use MAX_CHUNK_SIZE
             chunk_size = MAX_CHUNK_SIZE
         else:
-            fdict: typing.DefaultDict[str, int] = collections.defaultdict(int)
+            fdict: collections.defaultdict[str, int] = collections.defaultdict(int)
             for filename in files:
                 size = os.path.getsize(filename)
                 f_ = filename.split(".split", 1)[0]
@@ -177,7 +173,7 @@ if __name__ == "__main__":
             chunk_size = min(chunk_size, MAX_CHUNK_SIZE)
 
     # no need to sort if number of lines <= chunk_size
-    if (estimated_lines <= chunk_size):
+    if estimated_lines <= chunk_size:
         print(" ".join(params), flush=True)
         sys.exit(0)
 
@@ -191,12 +187,12 @@ if __name__ == "__main__":
     strand_key = "--strand="
     strand_index = None
     for index, value in enumerate(params):
-        if value[:len(output_key)] == output_key:
+        if value[: len(output_key)] == output_key:
             output_index = index
-            output_alignment_file = value[len(output_key):]
+            output_alignment_file = value[len(output_key) :]
             output_alignment_file_base, output_format = output_alignment_file.rsplit(".", 1)
 
-        if value[:len(strand_key)] == strand_key:
+        if value[: len(strand_key)] == strand_key:
             strand_index = index
 
     if output_alignment_file_base is None:
@@ -226,7 +222,7 @@ if __name__ == "__main__":
     else:
         sys.exit(f"Error: could not figure out direction from strand value {params[strand_index]}")
 
-    for line in open(input_file, "r"):
+    for line in open(input_file):
         if line == "":
             continue
         seq1_name, seq1_start, seq1_end, seq2_name, seq2_start, seq2_end, _dir, score = line.split()
@@ -251,22 +247,22 @@ if __name__ == "__main__":
 
     # NOTE: assuming data.keys() preserves order of keys. Requires Python 3.7+
 
-    query_key_order = list(dict.fromkeys([i[1] for i in data.keys()]))
+    query_key_order = list(dict.fromkeys([i[1] for i in data]))
 
     if len(data.keys()) > 1:
-        for pair in data.keys():
+        for pair in data:
             if len(data[pair]) <= chunk_size:
                 skip_pairs.append(pair)
 
     # sorting for forward segments
     if direction == "r":
-        for pair in data.keys():
+        for pair in data:
             if pair not in skip_pairs:
                 data[pair] = sorted(data[pair], key=lambda coord: (coord[1] - coord[0], coord[0]))
 
     # sorting for reverse segments
     elif direction == "f":
-        for pair in data.keys():
+        for pair in data:
             if pair not in skip_pairs:
                 data[pair] = sorted(data[pair], key=lambda coord: (coord[1] + coord[0], coord[0]))
     else:
@@ -275,7 +271,7 @@ if __name__ == "__main__":
     # Writing file in chunks
     ctr = 0
     # [i for i in data_keys if i not in set(skip_pairs)]:
-    for pair in (data.keys() - skip_pairs):
+    for pair in data.keys() - skip_pairs:
         for chunk in chunks(list(zip(*data[pair]))[2], chunk_size):
             ctr += 1
             name_addition = f".split{ctr}"

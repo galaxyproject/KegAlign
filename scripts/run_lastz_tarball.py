@@ -19,7 +19,7 @@ import typing
 
 
 @contextlib.contextmanager
-def open_file(filename: str):
+def open_file(filename: str) -> typing.Iterator[typing.IO[str]]:
     if filename.endswith(".gz"):
         with gzip.open(filename, "wt", compresslevel=6) as f:
             yield f
@@ -35,12 +35,12 @@ lastz_output_format_regex = re.compile(
 
 
 # Specifies the output format: lav, lav+text, axt, axt+, maf, maf+, maf-, sam, softsam, sam-, softsam-, cigar, BLASTN, PAF, PAF:wfmash, differences, rdotplot, text, general[:<fields>], or general-[:<fields>].
-# ‑‑format=none can be used when no alignment output is desired.
+# --format=none can be used when no alignment output is desired.
 
 
 def run_command(
     instance: int,
-    input_queue: "queue.Queue[typing.Dict[str, typing.Any]]",
+    input_queue: "queue.Queue[dict[str, typing.Any]]",
     output_queue: "queue.Queue[float]",
     debug: bool = False,
 ) -> str | None:
@@ -48,9 +48,7 @@ def run_command(
 
     # These are not considered errors even though
     # we will end up with a segmented alignment
-    truncation_regex = re.compile(
-        r"truncating alignment (ending|starting) at \(\d+,\d+\);  anchor at \(\d+,\d+\)$"
-    )
+    truncation_regex = re.compile(r"truncating alignment (ending|starting) at \(\d+,\d+\);  anchor at \(\d+,\d+\)$")
     truncation_msg = "truncation can be reduced by using --allocate:traceback to increase traceback memory"
 
     while True:
@@ -64,7 +62,7 @@ def run_command(
 
         stdin = command_dict["stdin"]
         if stdin is not None:
-            stdin = open(stdin, "r")
+            stdin = open(stdin)
 
         stdout = command_dict["stdout"]
         if stdout is not None:
@@ -93,7 +91,7 @@ def run_command(
                     with open(stderr_file) as f:
                         for stderr_line in f:
                             stderr_line = stderr_line.strip()
-                            if (not truncation_regex.match(stderr_line) and stderr_line != truncation_msg):
+                            if not truncation_regex.match(stderr_line) and stderr_line != truncation_msg:
                                 stderr_ok = False
             except Exception:
                 stderr_ok = False
@@ -110,13 +108,13 @@ class BatchTar:
         self.pathname = pathname
         self.debug = debug
         self.tarfile = None
-        self.commands: typing.List[typing.Dict[str, typing.Any]] = []
+        self.commands: list[dict[str, typing.Any]] = []
         self.format_name = "tabular"
         self._extract()
         self._load_commands()
         self._load_format()
 
-    def batch_commands(self) -> typing.Iterator[typing.Dict[str, typing.Any]]:
+    def batch_commands(self) -> typing.Iterator[dict[str, typing.Any]]:
         for command in self.commands:
             yield command
 
@@ -125,9 +123,7 @@ class BatchTar:
 
     def _extract(self) -> None:
         try:
-            self.tarball = tarfile.open(
-                name=self.pathname, mode="r:*", format=tarfile.GNU_FORMAT
-            )
+            self.tarball = tarfile.open(name=self.pathname, mode="r:*", format=tarfile.GNU_FORMAT)
         except FileNotFoundError:
             sys.exit(f"ERROR: unable to find input tarball: {self.pathname}")
         except tarfile.ReadError:
@@ -139,17 +135,13 @@ class BatchTar:
         elapsed = time.perf_counter() - begin
 
         if self.debug:
-            print(
-                f"Extracted tarball in {elapsed} seconds", file=sys.stderr, flush=True
-            )
+            print(f"Extracted tarball in {elapsed} seconds", file=sys.stderr, flush=True)
 
     def _load_commands(self) -> None:
         try:
             f = open("galaxy/commands.json")
         except FileNotFoundError:
-            sys.exit(
-                f"ERROR: input tarball missing galaxy/commands.json: {self.pathname}"
-            )
+            sys.exit(f"ERROR: input tarball missing galaxy/commands.json: {self.pathname}")
 
         begin = time.perf_counter()
         for json_line in f:
@@ -157,9 +149,7 @@ class BatchTar:
             try:
                 command_dict = json.loads(json_line)
             except json.JSONDecodeError:
-                sys.exit(
-                    f"ERROR: bad json line in galaxy/commands.json: {self.pathname}"
-                )
+                sys.exit(f"ERROR: bad json line in galaxy/commands.json: {self.pathname}")
 
             self._load_command(command_dict)
 
@@ -173,9 +163,9 @@ class BatchTar:
                 flush=True,
             )
 
-    def _load_command(self, command_dict: typing.Dict[str, typing.Any]) -> None:
+    def _load_command(self, command_dict: dict[str, typing.Any]) -> None:
         # check command_dict structure
-        field_types: typing.Dict[str, typing.List[typing.Any]] = {
+        field_types: dict[str, list[typing.Any]] = {
             "executable": [str],
             "args": [list],
             "stdin": [str, "None"],
@@ -184,7 +174,7 @@ class BatchTar:
         }
 
         bad_format = False
-        for field_name in field_types.keys():
+        for field_name in field_types:
             # missing field
             if field_name not in command_dict:
                 bad_format = True
@@ -212,9 +202,7 @@ class BatchTar:
                     break
 
         if bad_format:
-            sys.exit(
-                f"ERROR: unexpected json format in line in galaxy/commands.json: {self.pathname}"
-            )
+            sys.exit(f"ERROR: unexpected json format in line in galaxy/commands.json: {self.pathname}")
 
         self.commands.append(command_dict)
 
@@ -239,7 +227,7 @@ class BatchTar:
             "sam": "sam",
             "sam-": "sam",
             "softsam": "sam",
-            "softsam-": "sam"
+            "softsam-": "sam",
         }
 
         self.format_name = format_map.get(format_name, "tabular")
@@ -258,8 +246,8 @@ class TarRunner:
         self.parallel = parallel
         self.debug = debug
         self.batch_tar = BatchTar(self.input_pathname, debug=self.debug)
-        self.output_file_format: typing.Dict[str, str] = {}
-        self.output_files: typing.Dict[str, typing.List[str]] = {}
+        self.output_file_format: dict[str, str] = {}
+        self.output_files: dict[str, list[str]] = {}
         self._set_output()
         self._set_target_query()
 
@@ -295,7 +283,7 @@ class TarRunner:
 
     def _set_target_query(self) -> None:
         for command_dict in self.batch_tar.batch_commands():
-            new_args: typing.List[str] = []
+            new_args: list[str] = []
 
             for arg in command_dict["args"]:
                 if arg.startswith("--target="):
@@ -312,7 +300,7 @@ class TarRunner:
         begin = time.perf_counter()
 
         with multiprocessing.Manager() as manager:
-            input_queue: queue.Queue[typing.Dict[str, typing.Any]] = manager.Queue()
+            input_queue: queue.Queue[dict[str, typing.Any]] = manager.Queue()
             output_queue: queue.Queue[float] = manager.Queue()
 
             for command_dict in self.batch_tar.batch_commands():
@@ -322,9 +310,7 @@ class TarRunner:
             for _ in range(self.parallel):
                 input_queue.put({})
 
-            with concurrent.futures.ProcessPoolExecutor(
-                max_workers=self.parallel
-            ) as executor:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=self.parallel) as executor:
                 futures = [
                     executor.submit(
                         run_command,

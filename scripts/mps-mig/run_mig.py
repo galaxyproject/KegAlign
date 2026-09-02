@@ -3,11 +3,12 @@
 import argparse
 import datetime
 import os
-import pynvml
 import re
 import subprocess
 import sys
 import time
+
+import pynvml
 
 
 def check_makedir(pathname: str) -> None:
@@ -30,7 +31,9 @@ class NamedPopen(subprocess.Popen[str]):
 class GPU_queue:
     """ """
 
-    def __init__(self, device_names: list[str], uid_folder: str, uid_prefix: str = "UID_", max_processes: list[int] | None = None):
+    def __init__(
+        self, device_names: list[str], uid_folder: str, uid_prefix: str = "UID_", max_processes: list[int] | None = None
+    ):
         # dict of lists. Each list is for a GPU or MIG device which
         # holds UID values of processes running on that device
         self.queue: dict[str, list[str]] = {}
@@ -50,15 +53,17 @@ class GPU_queue:
                 self.max_processes[device_names[i]] = max_processes[i]
 
     def __len__(self) -> int:
-        return sum([len(i) for i in gpu_queue.get_queue().values()])
+        return sum(len(i) for i in self.get_queue().values())
 
     def submit(self, uid: str, device_name: str) -> None:
         self.queue[device_name].append(uid)
         self.submitted_uid.add(uid)
 
         if self.max_processes:
-            if (self.max_processes[device_name] < len(self.queue[device_name])):
-                sys.exit(f"WARNING for device {device_name}, max process = {self.max_processes[device_name]}, running process = {len(self.queue[device_name])}")
+            if self.max_processes[device_name] < len(self.queue[device_name]):
+                sys.exit(
+                    f"WARNING for device {device_name}, max process = {self.max_processes[device_name]}, running process = {len(self.queue[device_name])}"
+                )
 
     """
     Removes processes that completed their GPU part but not necessarily CPU (LASTZ) part.
@@ -66,7 +71,13 @@ class GPU_queue:
     """
 
     def check_completion(self) -> None:
-        completed_uid = set([f for f in os.listdir(self.uid_folder) if self.uid_prefix in f and os.path.isfile(os.path.join(self.uid_folder, f))])
+        completed_uid = set(
+            [
+                f
+                for f in os.listdir(self.uid_folder)
+                if self.uid_prefix in f and os.path.isfile(os.path.join(self.uid_folder, f))
+            ]
+        )
 
         # check successfully completed jobs using file output from modified run_kegalign script
         uids_in_progress = completed_uid - self.completed_uid_history
@@ -324,27 +335,68 @@ def parse_args() -> argparse.Namespace:
     # TODO most variables with 'mig' in the name are misleading. They are used for both MIG and non-MIG GPUs. Need to rename these
     parser = argparse.ArgumentParser()
     parser.add_argument("--MIG", type=str, default="", help="Comma separated list of GPU or MIG device names")
-    parser.add_argument("--MPS", type=str, default="", help="Comma separated list of number of processes per GPU/MIG node.")
-    parser.add_argument("--kill_mps", action="store_true", help="Shutdown all MPS daemons. Does not run aligmnet. Used for debug purposes or when run_mig script improperly terminated.")
+    parser.add_argument(
+        "--MPS", type=str, default="", help="Comma separated list of number of processes per GPU/MIG node."
+    )
+    parser.add_argument(
+        "--kill_mps",
+        action="store_true",
+        help="Shutdown all MPS daemons. Does not run aligmnet. Used for debug purposes or when run_mig script improperly terminated.",
+    )
     # parser.add_argument("--skip_mps_init", action="store_true")
-    parser.add_argument("--refresh", type=float, default=0.2, help="Time in seconds to wait before checking for free GPU or MIG devices")
+    parser.add_argument(
+        "--refresh", type=float, default=0.2, help="Time in seconds to wait before checking for free GPU or MIG devices"
+    )
     # parser.add_argument("--usev", type=str, default="")
     parser.add_argument("--query", type=str, required=True, help="Directory containing partitioned input query file.")
     parser.add_argument("--target", type=str, required=True, help="Directory containing partitioned input target file.")
     parser.add_argument("--tmp_dir", type=str, required=True, help="Directory to store temporary files.")
     parser.add_argument("--output", type=str, required=True, help="Output alignment file name.")
-    parser.add_argument("--format", type=str, default="maf-", help="Output alignment file format. Must be supported by KegAlign, i.e. able to be concatenated.")
+    parser.add_argument(
+        "--format",
+        type=str,
+        default="maf-",
+        help="Output alignment file format. Must be supported by KegAlign, i.e. able to be concatenated.",
+    )
     parser.add_argument("--mps_pipe_dir", type=str, help="MPS pipe directory.")
-    parser.add_argument("--num_threads", type=int, default=-1, help="Number of threads to use for each KegAlign process.")
-    parser.add_argument("--segment_size", type=int, default=0, help="Maximum segment size output by KegAlign. Segment files larger than this parameter are partitioned. 0 does no partitioning, -1 estimates best partition size. See diagonal_partition.py")
-    parser.add_argument("--kegalign_cmd", type=str, default="run_kegalign_symlink", help="Command to KegAlign runner script. This is called when aligning each pair of query and target files.")
+    parser.add_argument(
+        "--num_threads", type=int, default=-1, help="Number of threads to use for each KegAlign process."
+    )
+    parser.add_argument(
+        "--segment_size",
+        type=int,
+        default=0,
+        help="Maximum segment size output by KegAlign. Segment files larger than this parameter are partitioned. 0 does no partitioning, -1 estimates best partition size. See diagonal_partition.py",
+    )
+    parser.add_argument(
+        "--kegalign_cmd",
+        type=str,
+        default="run_kegalign_symlink",
+        help="Command to KegAlign runner script. This is called when aligning each pair of query and target files.",
+    )
     parser.add_argument("--opt_cmd", type=str, default="", help="Additional options to pass to KegAlign runner script.")
-    parser.add_argument("--keep_partial", action="store_true", help="Keep output files for each pair of alignments after combining them. It is recommended to keep these files for debugging purposes or if output file format does not support concatenation.")
-    parser.add_argument("--only_missing", action="store_true", help="Only run KegAlign for missing pairs of query and target files, if any failed for some reason.")
-    parser.add_argument("--skip_mps_control", action="store_true", help="Skip starting and stopping MPS daemon. Used for debugging purposes.")
-    parser.add_argument("--start_uid", type=int, default=None, help="Start alignmet from a specific pair. Used for debugging purposes.")
+    parser.add_argument(
+        "--keep_partial",
+        action="store_true",
+        help="Keep output files for each pair of alignments after combining them. It is recommended to keep these files for debugging purposes or if output file format does not support concatenation.",
+    )
+    parser.add_argument(
+        "--only_missing",
+        action="store_true",
+        help="Only run KegAlign for missing pairs of query and target files, if any failed for some reason.",
+    )
+    parser.add_argument(
+        "--skip_mps_control",
+        action="store_true",
+        help="Skip starting and stopping MPS daemon. Used for debugging purposes.",
+    )
+    parser.add_argument(
+        "--start_uid", type=int, default=None, help="Start alignmet from a specific pair. Used for debugging purposes."
+    )
     parser.add_argument("--verbose", action="store_true", help="Print additional information to console.")
-    parser.add_argument("--twobit_ext", type=str, default=".2bit", help="File extensions of 2bit files in query and target directories.")
+    parser.add_argument(
+        "--twobit_ext", type=str, default=".2bit", help="File extensions of 2bit files in query and target directories."
+    )
     parser.add_argument("--resubmit_fails", action="store_false", help="Whether to resubmit failed alignment pairs.")
 
     return parser.parse_args()
@@ -381,7 +433,7 @@ def main() -> None:
     try:
         pynvml.nvmlInit()
     except pynvml.NVMLError as e:
-        sys.exit(f"ERROR: {str(e)}")
+        sys.exit(f"ERROR: {e!s}")
 
     timer = datetime.datetime.now()
     # TODO script currently only supports 1 GPU per KegAlign process. Add multiple GPU support if needed
@@ -425,7 +477,9 @@ def main() -> None:
 
     _2bit_extension = args.twobit_ext
     query_block_file_names = sorted([filename for filename in os.listdir(query_dir) if _2bit_extension not in filename])
-    target_block_file_names = sorted([filename for filename in os.listdir(target_dir) if _2bit_extension not in filename])
+    target_block_file_names = sorted(
+        [filename for filename in os.listdir(target_dir) if _2bit_extension not in filename]
+    )
 
     process_list = Process_List()
 
@@ -564,14 +618,20 @@ def main() -> None:
                         part += 1
                         continue
                 # run process in non blocking way
-                process = NamedPopen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=True, name=uid_name)
+                process = NamedPopen(
+                    command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=True, name=uid_name
+                )
                 process_list.append(process)
                 gpu_queue.submit(uid_name, mig_device)
                 # sum([len(i) for i in gpu_queue.get_queue().values()])
                 running = len(gpu_queue)
-                est_runtime = str((datetime.datetime.now() - timer) * (total_pairs / max(total_pairs - len(pairs) - running, 1))).split(".", 1)[0]
+                est_runtime = str(
+                    (datetime.datetime.now() - timer) * (total_pairs / max(total_pairs - len(pairs) - running, 1))
+                ).split(".", 1)[0]
                 if verbose:
-                    print(f"running process with pid={process.pid}, uid={uid_name} and mig_uuid={mig_device}. part {part} /{total_pairs}: {t} and {q}. Elapsed Time: {get_time(timer)}, estimated runtime: {est_runtime} [len(pairs) {len(pairs)}, running {running}]")
+                    print(
+                        f"running process with pid={process.pid}, uid={uid_name} and mig_uuid={mig_device}. part {part} /{total_pairs}: {t} and {q}. Elapsed Time: {get_time(timer)}, estimated runtime: {est_runtime} [len(pairs) {len(pairs)}, running {running}]"
+                    )
                     print(command)
                 # process_list.append(process)
                 mig_process_dict = gpu_queue.get_queue()
@@ -613,7 +673,7 @@ def main() -> None:
         output_file_list = [i for i in os.listdir(tmp_dir) if i.startswith("part_") and i.endswith(f".{output_format}")]
         expected_outputs = len(query_block_file_names) * len(target_block_file_names)
         if len(output_file_list) != expected_outputs:
-            print(f"Missing {expected_outputs-len(output_file_list)} output parts: ")
+            print(f"Missing {expected_outputs - len(output_file_list)} output parts: ")
             set_output_file_list = set(output_file_list)
 
             for k in range(1, expected_outputs + 1):
@@ -625,7 +685,6 @@ def main() -> None:
 
         normal_completion = True
     finally:
-
         if not normal_completion:
             output_stdout, output_stderr = process_list.get_output(terminate=True)
             if use_MPS and not bool(int(args.skip_mps_control)):
@@ -649,7 +708,9 @@ def main() -> None:
 
         print(f"total time {get_time(timer)}")
         python_log += f"total time {get_time(timer)}\n"
-        combine_results(tmp_dir, output_file, part_pattern=f"part_*.{output_format}", remove=(not bool(args.keep_partial)))
+        combine_results(
+            tmp_dir, output_file, part_pattern=f"part_*.{output_format}", remove=(not bool(args.keep_partial))
+        )
         print(f"result combination finished at {get_time(timer)}")
         python_log += f"result combination finished at {get_time(timer)}\n"
         python_log += f"Ending Time: {datetime.datetime.now()}\n"
@@ -668,7 +729,7 @@ def main() -> None:
         try:
             pynvml.nvmlShutdown()
         except pynvml.NVMLError as e:
-            sys.exit(f"ERROR: {str(e)}")
+            sys.exit(f"ERROR: {e!s}")
 
 
 if __name__ == "__main__":

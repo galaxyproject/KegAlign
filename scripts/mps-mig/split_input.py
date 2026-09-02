@@ -36,23 +36,17 @@ RUSAGE_ATTRS: typing.Final = [
     "ru_nivcsw",
 ]
 
-FastaSequence = collections.namedtuple(
-    "FastaSequence", ["description", "sequence", "length"], defaults=["", "", 0]
-)
+FastaSequence = collections.namedtuple("FastaSequence", ["description", "sequence", "length"], defaults=["", "", 0])
 
 
-def debug_start(
-    who: int = resource.RUSAGE_SELF, message: str = ""
-) -> tuple[resource.struct_rusage, int, int]:
+def debug_start(who: int = resource.RUSAGE_SELF, message: str = "") -> tuple[resource.struct_rusage, int, int]:
     print(f"DEBUG: {message}", file=sys.stderr, flush=True)
     r_beg = resource.getrusage(who)
     beg = time.monotonic_ns()
     return r_beg, beg, who
 
 
-def debug_end(
-    r_beg: resource.struct_rusage, beg: int, who: int, message: str = ""
-) -> None:
+def debug_end(r_beg: resource.struct_rusage, beg: int, who: int, message: str = "") -> None:
     ns = time.monotonic_ns() - beg
     r_end = resource.getrusage(who)
     print(f"DEBUG: {message}: {ns} ns", file=sys.stderr, flush=True)
@@ -73,9 +67,7 @@ class FastaFile:
         seqs: list[str] = []
 
         if args.debug:
-            debug_r_beg, debug_beg, debug_who = debug_start(
-                resource.RUSAGE_SELF, f"loading fasta {self.pathname}"
-            )
+            debug_r_beg, debug_beg, debug_who = debug_start(resource.RUSAGE_SELF, f"loading fasta {self.pathname}")
 
         with self._get_open_method() as f:
             for line in f:
@@ -84,9 +76,7 @@ class FastaFile:
                 if line.startswith(">"):
                     if seqs:
                         sequence = "".join(seqs)
-                        self.sequences.append(
-                            FastaSequence(description, sequence, len(sequence))
-                        )
+                        self.sequences.append(FastaSequence(description, sequence, len(sequence)))
                         seqs.clear()
 
                     description = line
@@ -95,9 +85,7 @@ class FastaFile:
 
             if seqs:
                 sequence = "".join(seqs)
-                self.sequences.append(
-                    FastaSequence(description, sequence, len(sequence))
-                )
+                self.sequences.append(FastaSequence(description, sequence, len(sequence)))
 
         if args.debug:
             debug_end(
@@ -117,7 +105,7 @@ class FastaFile:
         except Exception:
             pass
 
-        return open(self.pathname, mode="rt")
+        return open(self.pathname)
 
     @property
     def total_bases(self) -> int:
@@ -138,9 +126,7 @@ class FastaFile:
         self.sequences.clear()
         self.sequences.append(FastaSequence(description, sequence, len(sequence)))
 
-    def discard_sequences_after_and_including(
-        self, description: str, debug: bool = False
-    ) -> None:
+    def discard_sequences_after_and_including(self, description: str, debug: bool = False) -> None:
         split_index = -1
         for idx, sequence in enumerate(self.sequences):
             if sequence.description == f">{description}":
@@ -177,8 +163,7 @@ def convert_to_2bit(root_dir: str) -> None:
 
     cpus_available = len(os.sched_getaffinity(0))
     num_commands = len(commands)
-    if cpus_available > num_commands:
-        cpus_available = num_commands
+    cpus_available = min(cpus_available, num_commands)
 
     if args.debug:
         print(
@@ -193,9 +178,7 @@ def convert_to_2bit(root_dir: str) -> None:
 
 
 def twobit_wrapper(command: str) -> None:
-    process = subprocess.Popen(
-        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=True
-    )
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=True)
     stdout, stderr = process.communicate()
     if stdout:
         print(f"{stdout}", file=sys.stdout)
@@ -242,9 +225,7 @@ def split_chr(
             bin_size += target_fasta.sequences[ind].length
 
         if debug:
-            print(
-                f"DEBUG: chunk_{bin_no} num bp {bin_size}", file=sys.stderr, flush=True
-            )
+            print(f"DEBUG: chunk_{bin_no} num bp {bin_size}", file=sys.stderr, flush=True)
 
         chunk_size_list.append(bin_size)
         block_file_name = os.path.join(output_dir, f"chunk_{bin_no}")
@@ -288,9 +269,7 @@ if __name__ == "__main__":
         help="Input sequence in fasta or fasta.gz format",
     )
     parser.add_argument("--out", type=str, required=True, help="Output directory")
-    parser.add_argument(
-        "--to_2bit", action="store_true", help="Convert partitioned inputs into .2bit format"
-    )
+    parser.add_argument("--to_2bit", action="store_true", help="Convert partitioned inputs into .2bit format")
 
     parser.add_argument(
         "--max_chunks",
@@ -322,7 +301,7 @@ if __name__ == "__main__":
 
     if not os.path.exists(args.input):
         print(f"Input file {args.input} does not exist.")
-        exit(1)
+        sys.exit(1)
 
     os.makedirs(target_block_dir, exist_ok=True)
 
@@ -335,13 +314,10 @@ if __name__ == "__main__":
         # prevents parallel execution. As a workaround, pass the input file path
         # and initialize FastFile object in parallel_wrapper
         # TODO: find a better way to do this
-        pass_list = [
-            (target_file, "", i, False, False) for i in range(1, bin_count + 1)
-        ]
+        pass_list = [(target_file, "", i, False, False) for i in range(1, bin_count + 1)]
 
         cpus_available = len(os.sched_getaffinity(0))
-        if cpus_available > bin_count:
-            cpus_available = bin_count
+        cpus_available = min(cpus_available, bin_count)
 
         if args.debug:
             print(
@@ -350,9 +326,7 @@ if __name__ == "__main__":
                 flush=True,
             )
 
-        with concurrent.futures.ProcessPoolExecutor(
-            max_workers=cpus_available
-        ) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=cpus_available) as executor:
             for bins in executor.map(parallel_wrapper, pass_list):
                 i = len(bins)
                 loss = mse(bins, goal_bp)
@@ -372,7 +346,6 @@ if __name__ == "__main__":
     else:
         bin_count = args.max_chunks
     if args.debug:
-
         if args.goal_bp:
             print(
                 print(f"bin_count = {bin_count}, loss={best_bin_loss}"),

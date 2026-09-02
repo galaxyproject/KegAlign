@@ -1,0 +1,62 @@
+# Tooling configuration only. KegAlign is a CUDA/C++ program built with CMake;
+# the Python here is the wrapper and orchestration layer under scripts/, plus
+# the host-side tests. There is no Python package to build or install.
+
+[tool.ruff]
+# The conda-forge kegalign recipe pins python 3.12.*, so that is what the
+# scripts must run on. (kegalign-full is noarch and declares no python of its
+# own.) Raising the target would let ruff emit UP043/UP037 rewrites which parse
+# on 3.12 but raise TypeError there at runtime.
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # import ordering
+    "UP",        # pyupgrade -- modern type syntax
+    "B",         # flake8-bugbear
+    "SIM",       # flake8-simplify
+    "PL",        # pylint
+    "DTZ",       # naive datetimes
+    "RUF",
+]
+ignore = [
+    "PLR0912",   # too many branches -- runner.py's job dispatch is genuinely branchy
+    "PLR0915",   # too many statements -- same
+    "PLR2004",   # magic values; the constants here are documented in place
+    "PLR0913",   # too many arguments
+
+    # --- pre-existing, deliberately not fixed in the same change as the config -
+    # Enabling these is worthwhile but each is a behaviour change in a script
+    # that runs in production, and mixing that into a formatting commit makes a
+    # regression impossible to bisect. Counts are as of this commit; drop a code
+    # from this list and fix its sites in a change of its own.
+    "SIM115",    # 8  open() without a context manager -- real fd leaks
+    "PLW1510",   # 4  subprocess.run without check= -- errors currently ignored
+    "PLW2901",   # 9  loop variable overwritten in the body
+    "DTZ005",    # 6  datetime.now() without a timezone
+    "UP028",     # 3  yield from
+    "PLC0206",   # 4  dict iterated without .items()
+    "UP022",     # 3  subprocess capture_output
+    "SIM102",    # 3  collapsible nested if
+    "B905",      # 3  zip() without strict=
+    "E501",      # 13 long lines: 11 in scripts/mps-mig/, 1 each in
+                 #    run_lastz_tarball.py and runner.py
+    "B007",      # 3  unused loop control variable
+    "SIM105",    # 1  contextlib.suppress
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The tests deliberately mirror runner.py's arithmetic; keep that readable.
+"tests/*.py" = ["PLR2004"]
+
+# scripts/mps-mig/ is not installed by the conda recipe -- it is a development
+# harness for MIG/MPS experiments. Two of these are dead locals that read as an
+# unfinished code path rather than as noise, so they are flagged here instead of
+# deleted: no_MIG is computed (and announced with "Using non-MIG GPU") but never
+# read, so the non-MIG mode may not actually be honoured, and non_mig_gpu_id sits
+# under its own "TODO make this non hardcoded". Someone who knows the intent
+# should decide; a linter should not.
+"scripts/mps-mig/*.py" = ["F841", "RUF059", "SIM113"]
