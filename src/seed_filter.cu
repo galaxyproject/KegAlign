@@ -331,6 +331,13 @@ void find_hsps (const char* __restrict__  d_ref_seq, const char* __restrict__  d
             ref_pos   = ref_loc[warp_id] + pos_offset;
             query_pos = query_loc[warp_id] + pos_offset;
             thread_score = 0;
+            // Lanes past the end of either sequence never assign these, yet the
+            // match test below reads them unconditionally -- uninitialised on the
+            // first tile, stale from the previous tile after that. Give them
+            // definite and deliberately UNEQUAL values, so such a lane is never
+            // counted and the index below cannot go negative.
+            r_chr = E_NT;
+            q_chr = A_NT;
 
             if(ref_pos < ref_len && query_pos < query_len){
                 r_chr = d_ref_seq[ref_pos];
@@ -444,7 +451,18 @@ void find_hsps (const char* __restrict__  d_ref_seq, const char* __restrict__  d
             }
             __syncwarp();
 
-            if(r_chr == q_chr){
+            // r_chr is a compressed code in 0..7, but count[] and count_del[] hold
+            // four entries -- only the real bases contribute to base-composition
+            // entropy. Without the bound, an aligned pair of masked bases, Ns, Xs
+            // or block separators writes past the arrays. LASTZ does the same thing
+            // safely by sizing its counter count[256] so the extra increments are
+            // discarded (compute_entropy, dna_utilities.c). That makes this bound
+            // safe and sensible, not provably identical to LASTZ: its
+            // entropy_lower_ok() variant folds lower case back into A/C/G/T, which
+            // KegAlign cannot do because compress_string collapses all four
+            // lower-case bases to the single code L_NT. Unreachable in practice --
+            // masked columns score bad_score and x-drop before being counted.
+            if(r_chr == q_chr && r_chr < L_NT){
                 if(pos_offset <= prev_max_pos[warp_id]){
                     count[r_chr] += 1;
                 }
@@ -481,6 +499,13 @@ void find_hsps (const char* __restrict__  d_ref_seq, const char* __restrict__  d
         while(!xdrop_found[warp_id] && !edge_found[warp_id]){
             pos_offset = lane_id+1+tile[warp_id];
             thread_score = 0;
+            // Lanes past the end of either sequence never assign these, yet the
+            // match test below reads them unconditionally -- uninitialised on the
+            // first tile, stale from the previous tile after that. Give them
+            // definite and deliberately UNEQUAL values, so such a lane is never
+            // counted and the index below cannot go negative.
+            r_chr = E_NT;
+            q_chr = A_NT;
 
             if(ref_loc[warp_id] >= pos_offset  && query_loc[warp_id] >= pos_offset){
                 ref_pos   = ref_loc[warp_id] - pos_offset;
@@ -595,7 +620,18 @@ void find_hsps (const char* __restrict__  d_ref_seq, const char* __restrict__  d
             }
             __syncwarp();
 
-            if(r_chr == q_chr){
+            // r_chr is a compressed code in 0..7, but count[] and count_del[] hold
+            // four entries -- only the real bases contribute to base-composition
+            // entropy. Without the bound, an aligned pair of masked bases, Ns, Xs
+            // or block separators writes past the arrays. LASTZ does the same thing
+            // safely by sizing its counter count[256] so the extra increments are
+            // discarded (compute_entropy, dna_utilities.c). That makes this bound
+            // safe and sensible, not provably identical to LASTZ: its
+            // entropy_lower_ok() variant folds lower case back into A/C/G/T, which
+            // KegAlign cannot do because compress_string collapses all four
+            // lower-case bases to the single code L_NT. Unreachable in practice --
+            // masked columns score bad_score and x-drop before being counted.
+            if(r_chr == q_chr && r_chr < L_NT){
                 if(pos_offset <= prev_max_pos[warp_id]){
                     count[r_chr] += 1;
                 }
