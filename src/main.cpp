@@ -211,6 +211,12 @@ int main(int argc, char** argv){
         cfg.seed.size = seed_len;
     }
 
+    if(cfg.seed.size < 1 || cfg.seed.size > MAX_SEED_SPAN){
+        fprintf(stderr, "Error: seed pattern \"%s\" has span %d; must be 1 to %d\n",
+                cfg.seed.shape.c_str(), cfg.seed.size, MAX_SEED_SPAN);
+        return 1;
+    }
+
     cfg.seed.kmer_size = GenerateShapePos(cfg.seed.shape);
 
     if(cfg.seed.kmer_size < 1 || cfg.seed.kmer_size > MAX_SEED_WEIGHT){

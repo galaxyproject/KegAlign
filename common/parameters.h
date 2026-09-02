@@ -11,6 +11,14 @@
 // corrupted one silently breaks the capacity invariant.
 #define MAX_SEED_WEIGHT 15
 
+// Upper bound on a seed pattern's span (the length of the shape string).
+//
+// Independent of the weight above: "T" followed by ninety-nine zeroes has a
+// legal weight of 1 and a span of 100.  GetKmerIndexAtPos() reads the whole
+// span into a fixed nt[MAX_SEED_SPAN] before consulting shape_pos[], so an
+// unbounded span writes past that array once per candidate position.
+#define MAX_SEED_SPAN 64
+
 #define TRANSITION_MASK 2
 #define NUC 8 
 #define NUC2 NUC*NUC
