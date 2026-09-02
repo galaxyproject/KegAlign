@@ -69,10 +69,9 @@ void load_scoring_matrix(int scoring_matrix[][L_NT], int* bad_score, int* fill_s
 	*bad_score  = recover_bad_score((scoreset*) xss);
 	*fill_score = recover_fill_score((scoreset*) xss);
 
-	if (xss != NULL) {
-		free_if_valid("score set", xss);
-		xss = NULL;
-	}
+	// No NULL check: read_score_set_by_name() calls suicide()/fopen_or_die() on
+	// every failure path, so it either returns a score set or does not return.
+	free_if_valid("score set", xss);
 }
 
 void build_substitution_matrix(int* sub_mat, int scoring_matrix[][L_NT], int bad_score, int fill_score, const char* ambiguous_field, int ambiguous_reward, int ambiguous_penalty, int xdrop) {
