@@ -259,20 +259,29 @@ def main() -> None:
         if args.output_type == "commands":
             output_filename = args.output_file
 
+        # The lines arrive in whatever order the diagonal partitioners finish,
+        # so the file they are written to -- and commands.json, which
+        # package_output.py builds from it line by line -- would differ between
+        # runs of the same input. lastz is still fed as the lines stream in;
+        # only the file is ordered, and only at the end.
+        output_lines: list[str] = []
+        while True:
+            line = output_q.get()
+            if line == SENTINEL_VALUE:
+                output_q.task_done()
+                break
+
+            # messy, fix this
+            if skip_kegalign:
+                lastz_commands.add(line)
+
+            if args.output_type != "commands":
+                kegalign_q.put(line)
+
+            output_lines.append(line)
+
         with open(output_filename, "w") as f:
-            while True:
-                line = output_q.get()
-                if line == SENTINEL_VALUE:
-                    output_q.task_done()
-                    break
-
-                # messy, fix this
-                if skip_kegalign:
-                    lastz_commands.add(line)
-
-                if args.output_type != "commands":
-                    kegalign_q.put(line)
-
+            for line in sorted(output_lines, key=lastz_command_sort_key):
                 print(line, file=f)
 
         if args.output_type == "output":
@@ -396,6 +405,20 @@ def diagonal_partition_worker(
 
         if process.returncode != 0:
             sys.exit(f"Error: diagonal partitioner {instance} exited with returncode {process.returncode}")
+
+
+def lastz_command_sort_key(line: str) -> "KegAlignSegment":
+    """Order a lastz command line the way SegAlign ordered its output files.
+
+    KegAlignSegment.__lt__ compares on strand (plus=0, minus=1), tmp, block, r
+    and split -- the same order `sort -V` over tmp*.plus.* then tmp*.minus.*
+    produced in scripts/run_segalign.
+    """
+    match = re.search(r"--segments=(\S+)", line)
+    if match is None:
+        sys.exit(f"Error: no --segments= in lastz command: {line}")
+
+    return KegAlignSegment(match.group(1))
 
 
 def estimate_chunk_size(args: argparse.Namespace) -> int:
