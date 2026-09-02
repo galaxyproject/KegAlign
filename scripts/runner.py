@@ -56,6 +56,22 @@ class LastzCommands:
         for segment in self.kegalign_segments:
             yield segment
 
+    def sorted_commands(self) -> list["LastzCommand"]:
+        """Commands in the order SegAlign concatenated its output.
+
+        The shell implementation this replaced ran lastz in parallel and then
+        concatenated deterministically:
+
+            for i in tmp*.plus.*;  do echo $i; done | sort -V
+            for i in tmp*.minus.*; do echo $i; done | sort -V
+
+        KegAlignSegment.__lt__ already encodes exactly that order -- strand
+        first (plus=0, minus=1), then tmp, block, r, split -- it was simply
+        never called. self.commands is insertion-ordered, i.e. whatever order
+        the partitioners happened to emit.
+        """
+        return sorted(self.commands.values(), key=lambda c: KegAlignSegment(c.segments_filename))
+
 
 class LastzCommand:
     lastz_command_regex = re.compile(
@@ -264,7 +280,7 @@ def main() -> None:
 
             with open(args.output_file, "w") as of:
                 print("##maf version=1", file=of)
-                for lastz_command in lastz_commands.commands.values():
+                for lastz_command in lastz_commands.sorted_commands():
                     with open(lastz_command.output_filename) as f:
                         for line in f:
                             of.write(line)

@@ -39,6 +39,9 @@ jobs:
 
       - name: runner.py chunk-size estimation
         run: python tests/test_chunk_size.py
+
+      - name: MAF output order is deterministic
+        run: python tests/test_output_order.py
       - name: ruff
         run: |
           pipx run ruff check scripts tests
