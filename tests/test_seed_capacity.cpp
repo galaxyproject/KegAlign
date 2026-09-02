@@ -136,6 +136,21 @@ int main()
     expect_eq("notransition gives one seed per position",
               MaxSeedsPerChunk(false, GetNumTransitions(), chunk), chunk);
 
+    // --- the weight floor -------------------------------------------------
+    // GenerateSeedPosTable() asserts kmer_size > 3, and NDEBUG deletes that in
+    // a Release build. MIN_SEED_WEIGHT is what actually holds the line, so pin
+    // the two ends of the legal range against the assert they stand in for.
+    // This pins the constant to the assert it mirrors. It cannot execute that
+    // assert -- it is CUDA-side and NDEBUG deletes it anyway -- so it is a
+    // tripwire for the two drifting apart, not a test of the device code.
+    expect_eq("MIN_SEED_WEIGHT is the assert(kmer_size > 3) bound, +1",
+              MIN_SEED_WEIGHT, 4);
+    {
+        std::string w3(3, 'T'), w4(4, 'T');
+        expect_eq("a weight-3 pattern is below the floor", GenerateShapePos(w3), 3);
+        expect_eq("a weight-4 pattern is the smallest legal one", GenerateShapePos(w4), 4);
+    }
+
     // --- an over-weight pattern must not corrupt the arrays it is rejected by -
     // shape_pos[] and transition_pos[] hold 32 entries, and GenerateShapePos()
     // used to fill them before any caller could check the weight -- so the guard
