@@ -94,6 +94,30 @@ for line in shuffled:
 insertion = [x.output_filename for x in c.commands.values()]
 check("insertion order really is different (so the sort is load-bearing)", insertion != expected, True)
 
+# The commands FILE is a separate path from the MAF concatenation, and it is the
+# one Galaxy hands downstream: package_output.py builds commands.json from it
+# line by line. Measured on a real GPU run before this was fixed -- two runs of
+# the same input gave the same 21 commands in different orders, one starting
+# tmp11.plus and the other tmp3.minus.
+shuffled = lines[:]
+rng.shuffle(shuffled)
+by_key = sorted(shuffled, key=runner.lastz_command_sort_key)
+check(
+    "the command file order is stable regardless of arrival order",
+    all(sorted(rng.sample(lines, len(lines)), key=runner.lastz_command_sort_key) == by_key for _ in range(20)),
+    True,
+)
+check(
+    "the command file puts plus before minus",
+    ".plus." in by_key[0] and ".minus." in by_key[-1],
+    True,
+)
+check(
+    "main() writes the command file sorted",
+    "for line in sorted(output_lines, key=lastz_command_sort_key):" in RUNNER.read_text(),
+    True,
+)
+
 # The checks above exercise sorted_commands() directly, so they stay green if the
 # method is correct but main() never calls it -- which is exactly the regression.
 # Assert the call site too. (Mutation-checked: reverting either the sort key or
