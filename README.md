@@ -207,6 +207,14 @@ Matrix can be supplied as an input to **--scoring** parameter. Substitution matr
 
 The default output is a MAF alignment file. Other formats can be selected with the **--format** parameter.  See [LASTZ manual](https://lastz.github.io/lastz/#formats) for description of possible formats.
 
+## Implementation notes
+
+[docs/implementation-notes.md](docs/implementation-notes.md) maps the parts of KegAlign
+where the reasoning is not obvious from the code — the compressed alphabet, the seed
+pattern and its capacity bound, the scoring matrix and how it relates to LASTZ's two
+score sets, masking, entropy, HSP coordinates and ordering, and how parity with LASTZ
+is checked. It also collects the known problems, with the evidence for each.
+
 ## License
 This project is released under the MIT License.  
 See the [LICENSE](LICENSE) file for details.
