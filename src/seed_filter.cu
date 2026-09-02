@@ -460,8 +460,11 @@ void find_hsps (const char* __restrict__  d_ref_seq, const char* __restrict__  d
             // safe and sensible, not provably identical to LASTZ: its
             // entropy_lower_ok() variant folds lower case back into A/C/G/T, which
             // KegAlign cannot do because compress_string collapses all four
-            // lower-case bases to the single code L_NT. Unreachable in practice --
-            // masked columns score bad_score and x-drop before being counted.
+            // lower-case bases to the single code L_NT.  That lower-case gap is
+            // unreachable in practice -- masked columns score bad_score and x-drop
+            // before being counted -- but the bound itself is NOT: two IUPAC codes
+            // in one column both compress to X_NT, compare equal, and score
+            // fill_score = -100 against an xdrop of 910, so they are counted.
             if(r_chr == q_chr && r_chr < L_NT){
                 if(pos_offset <= prev_max_pos[warp_id]){
                     count[r_chr] += 1;
@@ -629,8 +632,11 @@ void find_hsps (const char* __restrict__  d_ref_seq, const char* __restrict__  d
             // safe and sensible, not provably identical to LASTZ: its
             // entropy_lower_ok() variant folds lower case back into A/C/G/T, which
             // KegAlign cannot do because compress_string collapses all four
-            // lower-case bases to the single code L_NT. Unreachable in practice --
-            // masked columns score bad_score and x-drop before being counted.
+            // lower-case bases to the single code L_NT.  That lower-case gap is
+            // unreachable in practice -- masked columns score bad_score and x-drop
+            // before being counted -- but the bound itself is NOT: two IUPAC codes
+            // in one column both compress to X_NT, compare equal, and score
+            // fill_score = -100 against an xdrop of 910, so they are counted.
             if(r_chr == q_chr && r_chr < L_NT){
                 if(pos_offset <= prev_max_pos[warp_id]){
                     count[r_chr] += 1;
