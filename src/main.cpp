@@ -213,6 +213,12 @@ int main(int argc, char** argv){
 
     cfg.seed.kmer_size = GenerateShapePos(cfg.seed.shape);
 
+    if(cfg.seed.kmer_size < 1 || cfg.seed.kmer_size > MAX_SEED_WEIGHT){
+        fprintf(stderr, "Error: seed pattern \"%s\" has weight %d; must be 1 to %d\n",
+                cfg.seed.shape.c_str(), cfg.seed.kmer_size, MAX_SEED_WEIGHT);
+        return 1;
+    }
+
     if(vm.count("gappedthresh") == 0)
         cfg.gappedthresh = cfg.hspthresh; 
 

@@ -1,5 +1,16 @@
 #define VERSION "v0.2.2.14"
 
+// Upper bound on a seed pattern's weight (its count of match positions).
+//
+// 15, not 32, and the tighter bound is the load-bearing one: GetKmerIndexAtPos
+// packs two bits per match position into a uint32_t, and INVALID_KMER is 1<<31.
+// At weight 16 a legitimate k-mer can equal that sentinel and be discarded as
+// invalid; above 16 the k-mer wraps outright.  Staying at or below 15 also keeps
+// shape_pos[32]/transition_pos[32] in bounds, and keeps GetNumTransitions()
+// honest -- MaxSeedsPerChunk() sizes the GPU seed buffer from that count, so a
+// corrupted one silently breaks the capacity invariant.
+#define MAX_SEED_WEIGHT 15
+
 #define TRANSITION_MASK 2
 #define NUC 8 
 #define NUC2 NUC*NUC

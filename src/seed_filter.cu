@@ -692,7 +692,7 @@ std::vector<segmentPair> SeedAndFilter (std::vector<uint64_t> seed_offset_vector
     // buffer overrun reached cudaMemcpy() as a bare " invalid argument " instead.
     if (num_seeds > (uint64_t) MAX_SEEDS) {
         fprintf(stderr, "Error: %u seeds in one chunk exceeds the seed buffer capacity of %ld\n", num_seeds, MAX_SEEDS);
-        exit(15);
+        die_after(15);
     }
 
     uint64_t* tmp_offset = (uint64_t*) malloc(num_seeds*sizeof(uint64_t));
