@@ -34,6 +34,11 @@ jobs:
           pipx run ruff check scripts tests
           pipx run ruff format --check scripts tests
 
+      - name: mypy --strict
+        run: |
+          pipx run mypy --config-file scripts/mypy.ini scripts/*.py
+          pipx run mypy --config-file scripts/mps-mig/mypy.ini scripts/mps-mig/*.py
+
       - name: CUDA architecture selection
         run: cmake -P tests/test_cuda_architectures.cmake
 

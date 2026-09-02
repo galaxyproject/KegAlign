@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import time
+import typing
 
 import pynvml
 
@@ -23,9 +24,12 @@ class NamedPopen(subprocess.Popen[str]):
     Like subprocess.Popen, but returns an object with a .name member
     """
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: typing.Any, **kwargs: typing.Any) -> None:
+        # `name` is ours, not Popen's. Forwarding it raised
+        # TypeError: Popen.__init__() got an unexpected keyword argument 'name'
+        # on the first process this class ever constructed.
+        self.name: str = kwargs.pop("name", "")
         super().__init__(*args, **kwargs)
-        self.name = kwargs.get("name", "")
 
 
 class GPU_queue:
@@ -238,9 +242,6 @@ class Process_List:
             self.stdout += stdout
             self.stderr += stderr
         return self.stdout, self.stderr
-
-    def print_fails(self) -> None:
-        print(f"FAILED: {self.fails()}")
 
 
 def run_command(command: str) -> str:
