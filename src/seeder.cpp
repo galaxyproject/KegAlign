@@ -1,3 +1,8 @@
+#include <algorithm>
+#include <numeric>
+#include <tuple>
+#include <vector>
+
 #include "graph.h"
 #include "ntcoding.h"
 #include "seed_filter.h"
@@ -8,6 +13,71 @@ std::atomic<uint64_t> seeder_body::num_seeds(0);
 std::atomic<uint64_t> seeder_body::num_hsps(0);
 std::atomic<uint32_t> seeder_body::total_xdrop(0);
 std::atomic<uint32_t> seeder_body::num_seeded_regions[BUFFER_DEPTH]={};
+
+
+// Remove duplicate HSPs once the chunks of this interval have been joined.
+//
+// SeedAndFilter() does sort and unique_copy() its output, but once per
+// MAX_HITS-bounded iteration, concatenating the results -- so duplicates already
+// survive within a single chunk. seeder.cpp then concatenates chunks with no
+// dedup at all. An HSP reachable from seeds in two places is emitted twice, and
+// lastz repeats the same gapped extension and reports a duplicate alignment.
+//
+// Returns how many were removed, so the #HSPs counter stays consistent with what
+// actually reaches the segments files.
+//
+// stable_sort, not sort: the survivor of a group has to be the FIRST occurrence.
+// With an unstable sort, which copy is kept -- and therefore the byte content of
+// the emitted file -- depends on the standard library's unspecified ordering of
+// equal elements, and is not reproducible across toolchains.
+//
+// Compaction is in place. Building a filtered copy would roughly double peak
+// memory for this call, and seeder runs tbb::flow::unlimited across every core.
+//
+// SCOPE, stated plainly. This removes bit-identical HSPs within one interval.
+// It deliberately does NOT reproduce the GPU's hspEqual(), which also collapses
+// an HSP contained by another on the same diagonal: applying containment here
+// could drop an HSP that lastz would have reported. It also does not reach
+// across intervals, which are separate calls writing separate files.
+static size_t drop_duplicate_hsps (std::vector<segmentPair>& hsps) {
+
+    if (hsps.size() < 2) {
+        return 0;
+    }
+
+    auto key = [&hsps](uint32_t i) {
+        const segmentPair& s = hsps[i];
+        return std::make_tuple(s.ref_start, s.query_start, s.len, s.score);
+    };
+
+    std::vector<uint32_t> order(hsps.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::stable_sort(order.begin(), order.end(),
+                     [&key](uint32_t a, uint32_t b) { return key(a) < key(b); });
+
+    std::vector<bool> duplicate(hsps.size(), false);
+    size_t removed = 0;
+    for (size_t i = 1; i < order.size(); i++) {
+        if (key(order[i]) == key(order[i-1])) {
+            duplicate[order[i]] = true;
+            removed++;
+        }
+    }
+
+    if (removed == 0) {
+        return 0;
+    }
+
+    size_t keep = 0;
+    for (size_t i = 0; i < hsps.size(); i++) {
+        if (!duplicate[i]) {
+            hsps[keep++] = hsps[i];
+        }
+    }
+    hsps.resize(keep);
+
+    return removed;
+}
 
 printer_input seeder_body::operator()(seeder_input input) {
 
@@ -119,6 +189,11 @@ printer_input seeder_body::operator()(seeder_input input) {
             }
         }
     }
+
+    // Adjust the counter too: it is incremented per chunk above, so without this
+    // the #HSPs figure --debug prints would exceed what the segments files hold.
+    seeder_body::num_hsps -= drop_duplicate_hsps(fw_hsps);
+    seeder_body::num_hsps -= drop_duplicate_hsps(rc_hsps);
 
     seeder_body::num_seeded_regions[buffer] += 1;
     seeder_body::total_xdrop += 1;
