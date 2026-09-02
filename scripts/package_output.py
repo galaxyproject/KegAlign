@@ -12,7 +12,17 @@ import typing
 
 import bashlex
 
-RUSAGE_ATTRS: typing.Final = ["ru_utime", "ru_stime", "ru_maxrss", "ru_minflt", "ru_majflt", "ru_inblock", "ru_oublock", "ru_nvcsw", "ru_nivcsw"]
+RUSAGE_ATTRS: typing.Final = [
+    "ru_utime",
+    "ru_stime",
+    "ru_maxrss",
+    "ru_minflt",
+    "ru_majflt",
+    "ru_inblock",
+    "ru_oublock",
+    "ru_nvcsw",
+    "ru_nivcsw",
+]
 
 
 class PackageFile:
@@ -22,7 +32,7 @@ class PackageFile:
         top_dir: str = "galaxy",
         data_dir: str = "files",
         config_file: str = "commands.json",
-        format_file: str = "format.txt"
+        format_file: str = "format.txt",
     ) -> None:
         self.pathname: str = os.path.realpath(pathname)
         self.data_root: str = os.path.join(top_dir, data_dir)
@@ -30,8 +40,8 @@ class PackageFile:
         self.config_file: str = config_file
         self.format_path: str = os.path.join(top_dir, format_file)
         self.format_file: str = format_file
-        self.tarfile: typing.Optional[tarfile.TarFile] = None
-        self.name_cache: typing.Dict[typing.Any, typing.Any] = {}
+        self.tarfile: tarfile.TarFile | None = None
+        self.name_cache: dict[typing.Any, typing.Any] = {}
         self.working_dir: str = os.path.realpath(os.getcwd())
 
     def _initialize(self) -> None:
@@ -52,7 +62,7 @@ class PackageFile:
         if self.tarfile is not None:
             self.tarfile.add(source_path, arcname=self.config_path, recursive=False)
 
-    def add_file(self, pathname: str, arcname: typing.Optional[str] = None) -> None:
+    def add_file(self, pathname: str, arcname: str | None = None) -> None:
         if self.tarfile is None:
             self._initialize()
 
@@ -74,9 +84,7 @@ class PackageFile:
             if self.tarfile is not None:
                 if dest_path not in self.name_cache:
                     try:
-                        self.tarfile.add(
-                            source_path, arcname=dest_path, recursive=False
-                        )
+                        self.tarfile.add(source_path, arcname=dest_path, recursive=False)
                     except FileNotFoundError:
                         sys.exit(f"missing source file {source_path}")
 
@@ -110,69 +118,68 @@ class bashCommandLineFile:
         self.config = config
         self.args = args
         self.package_file = package_file
-        self.executable: typing.Optional[str] = None
+        self.executable: str | None = None
         self._parse_lines()
         self._write_format()
 
     def _parse_lines(self) -> None:
-        with open("commands.json", "w") as ofh:
-            with open(self.pathname) as f:
-                line: str
-                for line in f:
-                    line = line.rstrip("\n")
-                    command_dict = self._parse_line(line)
-                    # we may want to re-write args here
-                    new_args_list = []
+        with open("commands.json", "w") as ofh, open(self.pathname) as f:
+            line: str
+            for line in f:
+                line = line.rstrip("\n")
+                command_dict = self._parse_line(line)
+                # we may want to re-write args here
+                new_args_list = []
 
-                    args_list = command_dict.get("args", [])
-                    for arg in args_list:
-                        if arg.startswith("--target="):
-                            pathname = arg[9:]
-                            new_args_list.append(arg)
-                            if "[" in pathname:
-                                elems = pathname.split("[")
-                                sequence_file = elems.pop(0)
-                                self.package_file.add_file(sequence_file, sequence_file)
-                                for elem in elems:
-                                    if elem.endswith("]"):
-                                        elem = elem[:-1]
-                                        if elem.startswith("subset="):
-                                            subset_file = elem[7:]
-                                            self.package_file.add_file(subset_file)
+                args_list = command_dict.get("args", [])
+                for arg in args_list:
+                    if arg.startswith("--target="):
+                        pathname = arg[9:]
+                        new_args_list.append(arg)
+                        if "[" in pathname:
+                            elems = pathname.split("[")
+                            sequence_file = elems.pop(0)
+                            self.package_file.add_file(sequence_file, sequence_file)
+                            for elem in elems:
+                                if elem.endswith("]"):
+                                    elem = elem[:-1]
+                                    if elem.startswith("subset="):
+                                        subset_file = elem[7:]
+                                        self.package_file.add_file(subset_file)
 
-                        elif arg.startswith("--query="):
-                            pathname = arg[8:]
-                            new_args_list.append(arg)
-                            if "[" in pathname:
-                                elems = pathname.split("[")
-                                sequence_file = elems.pop(0)
-                                self.package_file.add_file(sequence_file, sequence_file)
-                                for elem in elems:
-                                    if elem.endswith("]"):
-                                        elem = elem[:-1]
-                                        if elem.startswith("subset="):
-                                            subset_file = elem[7:]
-                                            self.package_file.add_file(subset_file)
-                        elif arg.startswith("--segments="):
-                            pathname = arg[11:]
-                            new_args_list.append(arg)
-                            self.package_file.add_file(pathname)
-                        elif arg.startswith("--scores="):
-                            pathname = arg[9:]
-                            new_args_list.append("--scores=data/scores.txt")
-                            self.package_file.add_file(pathname, "data/scores.txt")
-                        else:
-                            new_args_list.append(arg)
+                    elif arg.startswith("--query="):
+                        pathname = arg[8:]
+                        new_args_list.append(arg)
+                        if "[" in pathname:
+                            elems = pathname.split("[")
+                            sequence_file = elems.pop(0)
+                            self.package_file.add_file(sequence_file, sequence_file)
+                            for elem in elems:
+                                if elem.endswith("]"):
+                                    elem = elem[:-1]
+                                    if elem.startswith("subset="):
+                                        subset_file = elem[7:]
+                                        self.package_file.add_file(subset_file)
+                    elif arg.startswith("--segments="):
+                        pathname = arg[11:]
+                        new_args_list.append(arg)
+                        self.package_file.add_file(pathname)
+                    elif arg.startswith("--scores="):
+                        pathname = arg[9:]
+                        new_args_list.append("--scores=data/scores.txt")
+                        self.package_file.add_file(pathname, "data/scores.txt")
+                    else:
+                        new_args_list.append(arg)
 
-                    command_dict["args"] = new_args_list
-                    print(json.dumps(command_dict), file=ofh)
+                command_dict["args"] = new_args_list
+                print(json.dumps(command_dict), file=ofh)
 
         self.package_file.add_config("commands.json")
 
-    def _parse_line(self, line: str) -> typing.Dict[str, typing.Any]:
+    def _parse_line(self, line: str) -> dict[str, typing.Any]:
         # resolve shell redirects
-        trees: typing.List[typing.Any] = bashlex.parse(line, strictmode=False)
-        positions: typing.List[typing.Tuple[int, int]] = []
+        trees: list[typing.Any] = bashlex.parse(line, strictmode=False)
+        positions: list[tuple[int, int]] = []
 
         for tree in trees:
             visitor = nodevisitor(positions)
@@ -194,8 +201,8 @@ class bashCommandLineFile:
 
         return command_dict
 
-    def _parse_processed_line(self, line: str) -> typing.Dict[str, typing.Any]:
-        argv: typing.List[str] = list(bashlex.split(line))
+    def _parse_processed_line(self, line: str) -> dict[str, typing.Any]:
+        argv: list[str] = list(bashlex.split(line))
         self.executable = argv.pop(0)
 
         parser: argparse.ArgumentParser = argparse.ArgumentParser(add_help=False)
@@ -213,9 +220,7 @@ class bashCommandLineFile:
 
             if "bool_str_args" in arguments_section:
                 for arg in arguments_section["bool_str_args"].split():
-                    parser.add_argument(
-                        f"--{arg}", nargs="?", const=True, default=False
-                    )
+                    parser.add_argument(f"--{arg}", nargs="?", const=True, default=False)
 
             if "int_args" in arguments_section:
                 for arg in arguments_section["int_args"].split():
@@ -223,19 +228,17 @@ class bashCommandLineFile:
 
             if "bool_int_args" in arguments_section:
                 for arg in arguments_section["bool_int_args"].split():
-                    parser.add_argument(
-                        f"--{arg}", nargs="?", const=True, default=False
-                    )
+                    parser.add_argument(f"--{arg}", nargs="?", const=True, default=False)
 
         namespace, rest = parser.parse_known_intermixed_args(argv)
         vars_dict = vars(namespace)
 
-        command_dict: typing.Dict[str, typing.Any] = {
+        command_dict: dict[str, typing.Any] = {
             "executable": self.executable,
             "args": [],
         }
 
-        for var in vars_dict.keys():
+        for var in vars_dict:
             value = vars_dict[var]
             if value is not None:
                 if isinstance(value, bool):
@@ -273,7 +276,7 @@ class bashCommandLineFile:
 
 
 class nodevisitor(bashlex.ast.nodevisitor):  # type: ignore[misc]
-    def __init__(self, positions: typing.List[typing.Tuple[int, int]]) -> None:
+    def __init__(self, positions: list[tuple[int, int]]) -> None:
         self.positions = positions
         self.stdin = None
         self.stdout = None

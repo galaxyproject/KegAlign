@@ -16,10 +16,20 @@ import typing
 
 SENTINEL_VALUE: typing.Final = "SENTINEL"
 # CA_SENTEL_VALUE: typing.Final = ChunkAddress(0, 0, 0, 0, 0, SENTINEL_VALUE)
-RUSAGE_ATTRS: typing.Final = ["ru_utime", "ru_stime", "ru_maxrss", "ru_minflt", "ru_majflt", "ru_inblock", "ru_oublock", "ru_nvcsw", "ru_nivcsw"]
+RUSAGE_ATTRS: typing.Final = [
+    "ru_utime",
+    "ru_stime",
+    "ru_maxrss",
+    "ru_minflt",
+    "ru_majflt",
+    "ru_inblock",
+    "ru_oublock",
+    "ru_nvcsw",
+    "ru_nivcsw",
+]
 
 
-def inject_inner(line: str, inner: typing.Optional[int]) -> str:
+def inject_inner(line: str, inner: int | None) -> str:
     if inner is None or " --inner=" in line:
         return line
 
@@ -48,17 +58,19 @@ class LastzCommands:
 
 
 class LastzCommand:
-    lastz_command_regex = re.compile(r"lastz (.+?)?ref\.2bit\[nameparse=darkspace\]\[multiple\]\[subset=ref_block(\d+)\.name\] (.+?)?query\.2bit\[nameparse=darkspace\]\[subset=query_block(\d+)\.name] --format=(\S+) --ydrop=(\d+) --gappedthresh=(\d+) --strand=(minus|plus)(?: --inner=(\d+))?(?: --ambiguous=(\S+))?(?: --(notrivial))?(?: --scores=(\S+))? --segments=tmp(\d+)\.block(\d+)\.r(\d+)\.(minus|plus)(?:\.split(\d+))?\.segments --output=tmp(\d+)\.block(\d+)\.r(\d+)\.(minus|plus)(?:\.split(\d+))?\.(\S+) 2> tmp(\d+)\.block(\d+)\.r(\d+)\.(minus|plus)(?:\.split(\d+))?\.err")
+    lastz_command_regex = re.compile(
+        r"lastz (.+?)?ref\.2bit\[nameparse=darkspace\]\[multiple\]\[subset=ref_block(\d+)\.name\] (.+?)?query\.2bit\[nameparse=darkspace\]\[subset=query_block(\d+)\.name] --format=(\S+) --ydrop=(\d+) --gappedthresh=(\d+) --strand=(minus|plus)(?: --inner=(\d+))?(?: --ambiguous=(\S+))?(?: --(notrivial))?(?: --scores=(\S+))? --segments=tmp(\d+)\.block(\d+)\.r(\d+)\.(minus|plus)(?:\.split(\d+))?\.segments --output=tmp(\d+)\.block(\d+)\.r(\d+)\.(minus|plus)(?:\.split(\d+))?\.(\S+) 2> tmp(\d+)\.block(\d+)\.r(\d+)\.(minus|plus)(?:\.split(\d+))?\.err"
+    )
 
     def __init__(self, line: str) -> None:
         self.line = line
         self.args: list[str] = []
-        self.target_filename: str = ''
-        self.query_filename: str = ''
-        self.data_folder: str = ''
+        self.target_filename: str = ""
+        self.query_filename: str = ""
+        self.data_folder: str = ""
         self.ref_block: int = 0
         self.query_block: int = 0
-        self.output_format: str = ''
+        self.output_format: str = ""
         self.ydrop: int = 0
         self.gappedthresh: int = 0
         self.inner: int | None = None
@@ -66,9 +78,9 @@ class LastzCommand:
         self.ambiguous: bool = False
         self.nontrivial: bool = False
         self.scoring: str | None = None
-        self.segments_filename: str = ''
-        self.output_filename: str = ''
-        self.error_filename: str = ''
+        self.segments_filename: str = ""
+        self.output_filename: str = ""
+        self.error_filename: str = ""
 
         self._parse_command()
 
@@ -85,13 +97,17 @@ class LastzCommand:
         self.gappedthresh = int(match.group(7))
         strand = match.group(8)
 
-        if strand == 'plus':
+        if strand == "plus":
             self.strand = 0
-        elif strand == 'minus':
+        elif strand == "minus":
             self.strand = 1
 
-        self.target_filename = f"{self.data_folder}ref.2bit[nameparse=darkspace][multiple][subset=ref_block{self.ref_block}.name]"
-        self.query_filename = f"{self.data_folder}query.2bit[nameparse=darkspace][subset=query_block{self.query_block}.name]"
+        self.target_filename = (
+            f"{self.data_folder}ref.2bit[nameparse=darkspace][multiple][subset=ref_block{self.ref_block}.name]"
+        )
+        self.query_filename = (
+            f"{self.data_folder}query.2bit[nameparse=darkspace][subset=query_block{self.query_block}.name]"
+        )
 
         self.args = [
             "lastz",
@@ -100,7 +116,7 @@ class LastzCommand:
             f"--format={self.output_format}",
             f"--ydrop={self.ydrop}",
             f"--gappedthresh={self.gappedthresh}",
-            f"--strand={strand}"
+            f"--strand={strand}",
         ]
 
         inner = match.group(9)
@@ -150,12 +166,14 @@ class KegAlignSegments:
         if filename not in self.segments:
             self.segments[filename] = KegAlignSegment(filename)
 
-    def __iter__(self) -> "KegAlignSegments":
-        return self
-
-    def __next__(self) -> typing.Generator["KegAlignSegment", None, None]:
-        for segment in sorted(self.segments.values()):
-            yield segment
+    # __iter__ used to return self alongside a __next__ that was itself a
+    # generator function, so every next() handed back a fresh generator object
+    # and never raised StopIteration: iterating this class looped forever and
+    # yielded generators rather than segments. Nothing called it, which is why
+    # it went unnoticed -- LastzCommands.segments() has no callers. mypy --strict
+    # reports it as an incompatible yield type.
+    def __iter__(self) -> typing.Iterator["KegAlignSegment"]:
+        yield from sorted(self.segments.values())
 
 
 class KegAlignSegment:
@@ -179,9 +197,9 @@ class KegAlignSegment:
         self.r = int(match.group(3))
 
         strand = match.group(4)
-        if strand == 'plus':
+        if strand == "plus":
             self.strand = 0
-        if strand == 'minus':
+        if strand == "minus":
             self.strand = 1
 
         split = match.group(5)
@@ -191,7 +209,7 @@ class KegAlignSegment:
             self.split = int(split)
 
     def __lt__(self, other: "KegAlignSegment") -> bool:
-        for attr in ['strand', 'tmp', 'block', 'r', 'split']:
+        for attr in ["strand", "tmp", "block", "r", "split"]:
             self_value = getattr(self, attr)
             other_value = getattr(other, attr)
             if self_value < other_value:
@@ -206,10 +224,7 @@ def main() -> None:
     args, kegalign_args = parse_args()
     lastz_commands = LastzCommands()
 
-    if args.diagonal_partition:
-        num_diagonal_partitioners = args.num_cpu
-    else:
-        num_diagonal_partitioners = 0
+    num_diagonal_partitioners = args.num_cpu if args.diagonal_partition else 0
 
     with multiprocessing.Manager() as manager:
         kegalign_q: queue.Queue[str] = manager.Queue()
@@ -247,7 +262,7 @@ def main() -> None:
         if args.output_type == "output":
             run_lastz(args, kegalign_q, lastz_commands)
 
-            with open(args.output_file, 'w') as of:
+            with open(args.output_file, "w") as of:
                 print("##maf version=1", file=of)
                 for lastz_command in lastz_commands.commands.values():
                     with open(lastz_command.output_filename) as f:
@@ -297,7 +312,9 @@ def lastz_worker(input_q: queue.Queue[str], instance: int, lastz_commands: Lastz
         command = lastz_commands.commands[line]
 
         if not os.path.exists(command.output_filename):
-            process = subprocess.run(command.args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            process = subprocess.run(
+                command.args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
 
             for line in process.stdout.splitlines():
                 print(line, file=sys.stdout, flush=True)
@@ -310,7 +327,9 @@ def lastz_worker(input_q: queue.Queue[str], instance: int, lastz_commands: Lastz
                 sys.exit(f"Error: lastz {instance} exited with returncode {process.returncode}")
 
 
-def run_diagonal_partitioners(args: argparse.Namespace, num_workers: int, input_q: queue.Queue[str], output_q: queue.Queue[str]) -> None:
+def run_diagonal_partitioners(
+    args: argparse.Namespace, num_workers: int, input_q: queue.Queue[str], output_q: queue.Queue[str]
+) -> None:
     chunk_size = estimate_chunk_size(args)
 
     if args.debug:
@@ -321,7 +340,9 @@ def run_diagonal_partitioners(args: argparse.Namespace, num_workers: int, input_
             executor.submit(diagonal_partition_worker(args, input_q, output_q, chunk_size, i))
 
 
-def diagonal_partition_worker(args: argparse.Namespace, input_q: queue.Queue[str], output_q: queue.Queue[str], chunk_size: int, instance: int) -> None:
+def diagonal_partition_worker(
+    args: argparse.Namespace, input_q: queue.Queue[str], output_q: queue.Queue[str], chunk_size: int, instance: int
+) -> None:
     while True:
         line = input_q.get()
         if line == SENTINEL_VALUE:
@@ -331,7 +352,9 @@ def diagonal_partition_worker(args: argparse.Namespace, input_q: queue.Queue[str
         run_args = ["python", f"{args.tool_directory}/diagonal_partition.py", str(chunk_size)]
         for word in line.split():
             run_args.append(word)
-        process = subprocess.run(run_args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1, text=True)
+        process = subprocess.run(
+            run_args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1, text=True
+        )
 
         for line in process.stdout.splitlines():
             output_q.put(line)
@@ -355,7 +378,7 @@ def estimate_chunk_size(args: argparse.Namespace) -> int:
 
     # get size of each segment assuming DELETE_AFTER_CHUNKING == True
     # takes into account already split segments
-    fdict: typing.DefaultDict[str, int] = collections.defaultdict(int)
+    fdict: collections.defaultdict[str, int] = collections.defaultdict(int)
     for entry in os.scandir("."):
         if entry.name.endswith(".segments"):
             try:
@@ -396,7 +419,13 @@ def estimate_chunk_size(args: argparse.Namespace) -> int:
     return chunk_size
 
 
-def run_kegalign(args: argparse.Namespace, num_sentinel: int, kegalign_args: list[str], kegalign_q: queue.Queue[str], commands: LastzCommands) -> bool:
+def run_kegalign(
+    args: argparse.Namespace,
+    num_sentinel: int,
+    kegalign_args: list[str],
+    kegalign_q: queue.Queue[str],
+    commands: LastzCommands,
+) -> bool:
     skip_kegalign: bool = False
 
     # use the currently existing output file if it exists
@@ -442,7 +471,7 @@ def run_kegalign(args: argparse.Namespace, num_sentinel: int, kegalign_args: lis
     return skip_kegalign
 
 
-def load_kegalign_output(filename: str, inner: typing.Optional[int], kegalign_q: queue.Queue[str]) -> bool:
+def load_kegalign_output(filename: str, inner: int | None, kegalign_q: queue.Queue[str]) -> bool:
     load_success = False
 
     r_beg = resource.getrusage(resource.RUSAGE_SELF)
@@ -472,14 +501,26 @@ def load_kegalign_output(filename: str, inner: typing.Optional[int], kegalign_q:
 def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser = argparse.ArgumentParser(allow_abbrev=False)
 
-    parser.add_argument("--output-type", nargs="?", const="commands", default="commands", type=str, choices=["commands", "output", "tarball"], help="output type (default: %(default)s)")
+    parser.add_argument(
+        "--output-type",
+        nargs="?",
+        const="commands",
+        default="commands",
+        type=str,
+        choices=["commands", "output", "tarball"],
+        help="output type (default: %(default)s)",
+    )
     parser.add_argument("--output-file", type=str, required=True, help="output pathname")
     parser.add_argument("--diagonal-partition", action="store_true", help="run diagonal partition optimization")
     parser.add_argument("--nogapped", action="store_true", help="don't perform gapped extension stage")
     parser.add_argument("--markend", action="store_true", help="write a marker line just before completion")
     parser.add_argument("--inner", type=int, help="pass --inner to LASTZ command generation and execution")
-    parser.add_argument("--num-gpu", default=-1, type=int, help="number of GPUs to use (default: %(default)s [use all GPUs])")
-    parser.add_argument("--num-cpu", default=-1, type=int, help="number of CPUs to use (default: %(default)s [use all CPUs])")
+    parser.add_argument(
+        "--num-gpu", default=-1, type=int, help="number of GPUs to use (default: %(default)s [use all GPUs])"
+    )
+    parser.add_argument(
+        "--num-cpu", default=-1, type=int, help="number of CPUs to use (default: %(default)s [use all CPUs])"
+    )
     parser.add_argument("--debug", action="store_true", help="print debug messages")
     parser.add_argument("--tool_directory", type=str, required=True, help="tool directory")
 

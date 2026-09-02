@@ -29,6 +29,11 @@ jobs:
       - name: LASTZ scoring file is read in full
         run: bash tests/test_scoring.bash
 
+      - name: ruff
+        run: |
+          pipx run ruff check scripts tests
+          pipx run ruff format --check scripts tests
+
       - name: CUDA architecture selection
         run: cmake -P tests/test_cuda_architectures.cmake
 
