@@ -19,12 +19,22 @@ inline uint32_t NtChar2Int (char nt) {
     }
 }
 
+// Returns the pattern's weight -- its true count of match positions, which may
+// exceed what shape_pos[] can hold.  The caller is expected to reject anything
+// above MAX_SEED_WEIGHT; this function must not corrupt memory while producing
+// the number that check is made against, so it stops writing at the bound and
+// keeps counting.
 int GenerateShapePos (std::string shape) {
     shape_size = 0;
     num_transitions = 0;
     int j = 0;
-    for (int i = 0; i < shape.length(); i++) {
+    int weight = 0;
+    for (size_t i = 0; i < shape.length(); i++) {
         if ((shape[i] == '1') || (shape[i] == 'T')) {
+            weight++;
+            if (shape_size >= MAX_SEED_WEIGHT) {
+                continue;
+            }
             shape_pos[shape_size++] = i;
             if (shape[i] == 'T') {
                 transition_pos[j] = 1;
@@ -36,7 +46,7 @@ int GenerateShapePos (std::string shape) {
             j++;
         }
     }
-    return shape_size;
+    return weight;
 }
 
 int IsTransitionAtPos(int t) {
@@ -51,7 +61,7 @@ int GetNumTransitions() {
 
 uint32_t GetKmerIndexAtPos (char* sequence, size_t pos, uint32_t seed_size) {
 
-    uint32_t nt[64];
+    uint32_t nt[MAX_SEED_SPAN];
 
     for(int i = 0; i < seed_size; i++){
         nt[i] = NtChar2Int(sequence[pos+i]);

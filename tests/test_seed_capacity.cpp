@@ -25,6 +25,7 @@
 #include <stdint.h>
 #include <string>
 
+#include "parameters.h"
 #include "ntcoding.h"
 #include "seed_capacity.h"
 
@@ -45,6 +46,17 @@ static void expect_at_least(const char* label, uint64_t actual, uint64_t floor)
     if (actual < floor) {
         printf("not ok - %s\n     got: %lu\nexpected at least: %lu (short by %lu)\n",
                label, actual, floor, floor - actual);
+        failures++;
+    } else {
+        printf("ok - %s\n", label);
+    }
+}
+
+static void expect_at_most(const char* label, uint64_t actual, uint64_t ceiling)
+{
+    if (actual > ceiling) {
+        printf("not ok - %s\n     got: %lu\nexpected at most: %lu (over by %lu)\n",
+               label, actual, ceiling, actual - ceiling);
         failures++;
     } else {
         printf("ok - %s\n", label);
@@ -123,6 +135,20 @@ int main()
     GenerateShapePos(SEED_14of22);
     expect_eq("notransition gives one seed per position",
               MaxSeedsPerChunk(false, GetNumTransitions(), chunk), chunk);
+
+    // --- an over-weight pattern must not corrupt the arrays it is rejected by -
+    // shape_pos[] and transition_pos[] hold 32 entries, and GenerateShapePos()
+    // used to fill them before any caller could check the weight -- so the guard
+    // that rejects the pattern ran only after the overrun it was meant to stop.
+    // GenerateShapePos() now stops writing at MAX_SEED_WEIGHT and keeps counting,
+    // so the weight it reports is still the true one the error message needs.
+    {
+        std::string over(40, 'T');
+        int weight = GenerateShapePos(over);
+        expect_eq("over-weight pattern still reports its true weight", weight, 40);
+        expect_at_most("over-weight pattern writes no more than the arrays hold",
+                       GetNumTransitions(), MAX_SEED_WEIGHT);
+    }
 
     if (failures > 0) {
         printf("\n%d test(s) failed\n", failures);
