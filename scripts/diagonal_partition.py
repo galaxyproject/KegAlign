@@ -137,6 +137,13 @@ if __name__ == "__main__":
         # add 1 for newline
         line_size = len(f.readline())
 
+    # An empty segments file gives readline() == "" and so line_size == 0. The
+    # worker sys.exit()s on our non-zero return, so a ZeroDivisionError here ends
+    # the whole run -- after the GPU work is done.
+    if line_size <= 0:
+        print(" ".join(params), flush=True)
+        sys.exit(0)
+
     estimated_lines = file_size // line_size
 
     # check if chunk size should be estimated
@@ -160,7 +167,15 @@ if __name__ == "__main__":
                 f_ = filename.split(".split", 1)[0]
                 fdict[f_] += size
 
-            if len(fdict) < 7:
+            # statistics.quantiles() needs two data points on Python 3.10-3.12,
+            # one on 3.13+. The `len(files) < 2` test above does not supply that:
+            # files are keyed by prefix here, so the two split files
+            # DELETE_AFTER_CHUNKING itself produces -- a.split1.segments and
+            # a.split2.segments -- are len(files) == 2 but len(fdict) == 1.
+            # Same defect as runner.py's estimate_chunk_size(), second copy.
+            if len(fdict) < 2:
+                chunk_size = MAX_CHUNK_SIZE
+            elif len(fdict) < 7:
                 # outliers can heavily skew prediction if <7 data points
                 # to be safe, use 50% quantile
                 chunk_size = int(statistics.quantiles(fdict.values())[1] // line_size)
