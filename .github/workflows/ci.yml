@@ -29,6 +29,16 @@ jobs:
       - name: LASTZ scoring file is read in full
         run: bash tests/test_scoring.bash
 
+      # The bug this guards is interpreter-dependent: statistics.quantiles()
+      # raises on one data point up to 3.12 and returns it from 3.13. Pin 3.12,
+      # which is what the conda-forge kegalign recipe ships, or the named case
+      # silently stops being covered when the runner image advances.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: runner.py chunk-size estimation
+        run: python tests/test_chunk_size.py
       - name: ruff
         run: |
           pipx run ruff check scripts tests

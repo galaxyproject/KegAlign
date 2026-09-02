@@ -402,7 +402,12 @@ def estimate_chunk_size(args: argparse.Namespace) -> int:
             except FileNotFoundError:
                 continue
 
-            if line_size == -1:
+            if line_size <= 0:
+                # Latch from the first file that actually has a line. An empty
+                # segments file returns "" here, and a 0 would otherwise stick:
+                # the old `== -1` test never retried, so one empty file arriving
+                # first from os.scandir() (whose order is not defined) poisoned
+                # the estimate for the whole run.
                 try:
                     with open(entry.name) as f:
                         line_size = len(f.readline())  # add 1 for newline
@@ -411,7 +416,22 @@ def estimate_chunk_size(args: argparse.Namespace) -> int:
 
             fdict[entry.name.split(".split", 1)[0]] += file_size
 
-    if len(fdict) < 7:
+    # statistics.quantiles() needs at least two data points on Python 3.10-3.12,
+    # and one on 3.13+; the <7 branch below guarantees neither. A run whose
+    # alignment is sparse enough to produce a single .segments file reaches it
+    # with 1 and dies with an unhandled StatisticsError -- after the GPU work is
+    # already done. Zero files raises on every version.
+    #
+    # line_size is 0 for an empty first line, which divides by zero. (It also
+    # stays -1 when no file can be opened, but that path is unreachable: the
+    # same FileNotFoundError skips the fdict update, so fdict is empty and the
+    # quantile call fails first.)
+    if not fdict or line_size <= 0:
+        chunk_size = MAX_CHUNK_SIZE
+    elif len(fdict) == 1:
+        # one file: use it directly rather than asking for a quantile of it
+        chunk_size = int(next(iter(fdict.values())) // line_size)
+    elif len(fdict) < 7:
         # outliers can heavily skew prediction if <7 data points
         # to be safe, use 50% quantile
         chunk_size = int(statistics.quantiles(fdict.values())[1] // line_size)
@@ -421,6 +441,13 @@ def estimate_chunk_size(args: argparse.Namespace) -> int:
 
     # if not enough data points, there is a chance of getting unlucky
     # minimize worst case by using MAX_CHUNK_SIZE
+    #
+    # Do NOT clamp the lower end. 0 is a documented value, not an error:
+    # diagonal_partition.py says "set <max-segments> = 0 to skip partitioning"
+    # and passes the command through untouched. Flooring it at 1 would turn that
+    # no-op into one output file and one LASTZ command per segment line, for
+    # every file in the run, because chunk_size is estimated once and applied to
+    # all of them.
 
     chunk_size = min(chunk_size, MAX_CHUNK_SIZE)
 
