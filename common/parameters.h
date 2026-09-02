@@ -11,6 +11,24 @@
 // corrupted one silently breaks the capacity invariant.
 #define MAX_SEED_WEIGHT 15
 
+// Lower bound on a seed pattern's weight.
+//
+// This is the bound GenerateSeedPosTable() already states -- assert(kmer_size > 3)
+// in common/seed_pos_table.cu -- promoted to something the shipped binary
+// enforces. NDEBUG deletes that assert in a Release build, the same way it
+// deleted the seed-buffer assert, which is how the 14of22 overflow reached a
+// user as a bare cudaMemcpy failure rather than an error message.
+//
+// What goes wrong below 4 is NOT the index table: at weight 1, 2 and 3 the table
+// holds 5, 17 and 65 entries and every k-mer the seeder can produce indexes
+// inside it. A weight-3 run was observed dying on a GPU with
+//
+//     thrust::system::system_error: device free failed: cudaErrorIllegalAddress
+//
+// and the mechanism behind that has not been established here. Do not read this
+// bound as a fix for that crash; read it as the upstream precondition, enforced.
+#define MIN_SEED_WEIGHT 4
+
 // Upper bound on a seed pattern's span (the length of the shape string).
 //
 // Independent of the weight above: "T" followed by ninety-nine zeroes has a

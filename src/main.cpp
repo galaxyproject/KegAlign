@@ -219,9 +219,9 @@ int main(int argc, char** argv){
 
     cfg.seed.kmer_size = GenerateShapePos(cfg.seed.shape);
 
-    if(cfg.seed.kmer_size < 1 || cfg.seed.kmer_size > MAX_SEED_WEIGHT){
-        fprintf(stderr, "Error: seed pattern \"%s\" has weight %d; must be 1 to %d\n",
-                cfg.seed.shape.c_str(), cfg.seed.kmer_size, MAX_SEED_WEIGHT);
+    if(cfg.seed.kmer_size < MIN_SEED_WEIGHT || cfg.seed.kmer_size > MAX_SEED_WEIGHT){
+        fprintf(stderr, "Error: seed pattern \"%s\" has weight %d; must be %d to %d\n",
+                cfg.seed.shape.c_str(), cfg.seed.kmer_size, MIN_SEED_WEIGHT, MAX_SEED_WEIGHT);
         return 1;
     }
 
