@@ -285,8 +285,14 @@ def run_lastz(args: argparse.Namespace, input_q: queue.Queue[str], lastz_command
 
     try:
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_lastz_workers) as executor:
-            for i in range(num_lastz_workers):
-                executor.submit(lastz_worker, input_q, i, lastz_commands)
+            futures = [executor.submit(lastz_worker, input_q, i, lastz_commands) for i in range(num_lastz_workers)]
+            # submit() never raises what the worker raises, so without this the
+            # except below could not fire and a worker that called sys.exit()
+            # simply vanished -- alignments silently abandoned while this
+            # function reported success and main() went on to concatenate MAF
+            # files that were never written.
+            for future in concurrent.futures.as_completed(futures):
+                future.result()
     except Exception as e:
         sys.exit(f"Error: lastz failed: {e}")
 
@@ -335,9 +341,19 @@ def run_diagonal_partitioners(
     if args.debug:
         print(f"estimated chunk size: {chunk_size}", file=sys.stderr, flush=True)
 
+    # submit() takes the callable and its arguments; calling the worker here
+    # instead ran every partitioner to completion in this process, one after
+    # another, and handed submit() the None each returned. The pool did no work
+    # and the resulting TypeErrors sat unread in futures nobody collected.
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-        for i in range(num_workers):
-            executor.submit(diagonal_partition_worker(args, input_q, output_q, chunk_size, i))
+        futures = [
+            executor.submit(diagonal_partition_worker, args, input_q, output_q, chunk_size, i)
+            for i in range(num_workers)
+        ]
+        # Collect them. A worker that dies now raises here rather than vanishing:
+        # it runs in a child process, so its sys.exit() no longer ends the run.
+        for future in concurrent.futures.as_completed(futures):
+            future.result()
 
 
 def diagonal_partition_worker(
