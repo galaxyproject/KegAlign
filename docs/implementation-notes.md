@@ -8,7 +8,7 @@ Two conventions, both borrowed from LASTZ's own source. **Every claim names the 
 
 The authoritative explanation of any mechanism is the comment beside the code. Where this document and a source comment disagree, **the source comment wins and this document is stale.**
 
-**Which tree this describes.** `main` as of the v0.3.0 release, i.e. with the September 2026 fixes applied. Several of those landed as separate branches, so on any earlier commit the symbols named here — `MAX_SEED_WEIGHT`, `MAX_SEED_SPAN`, `drop_duplicate_hsps()`, `die_after()` — will not exist, and line numbers will not match.
+**Which tree this describes.** `main` as of the v0.3.1 release. On any earlier commit the symbols named here — `MIN_SEED_WEIGHT`, `MAX_SEED_WEIGHT`, `MAX_SEED_SPAN`, `drop_duplicate_hsps()`, `die_after()`, `sorted_commands()`, `lastz_command_sort_key()` — will not all exist, and line numbers will not match.
 
 1. [The compressed alphabet](#1-the-compressed-alphabet)
 
@@ -24,7 +24,9 @@ The authoritative explanation of any mechanism is the comment beside the code. W
 
 7. [Checking parity against LASTZ](#7-checking-parity-against-lastz)
 
-8. [Known problems](#8-known-problems)
+8. [The orchestration layer](#8-the-orchestration-layer)
+
+9. [Known problems](#9-known-problems)
 
 ## 1. The compressed alphabet
 
@@ -191,7 +193,7 @@ LASTZ does the same: `currParams->step` is passed only to `build_seed_position_t
 
 There was an `assert(num_seeds <= MAX_SEEDS)` in exactly the right place. conda-forge builds with `-DCMAKE_BUILD_TYPE=Release`, which defines `NDEBUG`, which deletes it. Every released build had no guard at all, so the overrun surfaced as a bare `" invalid argument "` from `cudaMemcpy` hundreds of lines from its cause. It is now a real runtime check that survives `NDEBUG`.
 
-### Why weight is capped at 15
+### Why weight is capped at 15, and floored at 4
 
 `MAX_SEED_WEIGHT` is 15, and the tighter-than-obvious bound is the load-bearing one. `GetKmerIndexAtPos()` packs two bits per match position into a `uint32_t`, and `INVALID_KMER` is `1<<31`. At weight 16 a legitimate k-mer can equal that sentinel and be silently discarded as invalid; above 16 it wraps outright. Staying at or below 15 also keeps `shape_pos[32]` and `transition_pos[32]` in bounds, and those matter more than they look. Each array sits immediately before a scalar it overruns into: `shape_pos[32]` aliases `shape_size` — the weight itself — and `transition_pos[32]` aliases `num_transitions`, the count `MaxSeedsPerChunk()` sizes the seed buffer from. An over-weight pattern corrupts the very numbers used to reject it and to size the buffer. Measured, not reasoned: on the pre-fix code `GenerateShapePos()` given forty `T`s returns **39**, because writing `shape_pos[32]` overwrote the loop counter mid-loop.
 
@@ -202,6 +204,24 @@ There was an `assert(num_seeds <= MAX_SEEDS)` in exactly the right place. conda-
 > ```bash
 > bash tests/test_seed_capacity.bash
 > ```
+
+### The floor is a deleted assert
+
+`MIN_SEED_WEIGHT` is 4 because `GenerateSeedPosTable()` asserts `kmer_size > 3`. That assert is deleted by `NDEBUG` in a Release build — the same way the seed-buffer assert was, which is how the `14of22` overflow reached a user as a bare `cudaMemcpy` failure. A weight-3 pattern was observed dying on a GPU with `thrust::system::system_error: device free failed: cudaErrorIllegalAddress`.
+
+Be careful what you attribute that crash to. It is **not** the index table: at weights 1, 2 and 3 the table holds 5, 17 and 65 entries and every k-mer the seeder can produce indexes inside it. Enumerated against the real `ntcoding.cpp`. The bound is the upstream precondition, enforced; the mechanism of the crash is not established here.
+
+### The index table quadruples with the weight
+
+`index_table_size = (1 << 2*kmer_size) + 1` `uint32`s, allocated per GPU and per reference block:
+
+| weight | index table |
+| --- | --- |
+| 12 (default `12of19`) | 64 MiB |
+| 14 (`14of22`) | 1 GiB |
+| 15 (the legal maximum) | **4 GiB** |
+
+`MAX_SEED_WEIGHT` is a correctness bound, not a resource one. Nothing warns that the top of the legal range costs 4 GiB of device memory — plus the same again on the host, since the table is `calloc`'d before it is copied.
 
 ### Known problem — one position is seeded twice at interval boundaries
 
@@ -623,9 +643,76 @@ A green run is not a blanket guarantee, and three limits are worth knowing befor
 
 > **Why this test exists.** In September 2026 a masking feature was designed, written, compiled and tested on the strength of reading one block of a scoring-file reader — and was wrong, because a second matrix seven hundred lines earlier overrides it for exactly the stage in question (§3). Every host-side test passed throughout; none of them could have known. This test would have refuted the premise in five minutes. _Reading half of a scoring-file reader is not evidence about behaviour._ When a parity question comes up, measure it here first.
 
-## 8. Known problems
+## 8. The orchestration layer
 
-Everything below is _open_ as of the September 2026 work. The defects that work fixed — the seed-buffer overflow, the discarded scoring-file values, the duplicate segments within an interval, the out-of-range entropy counters, the unbounded seed pattern arrays, the `exit()` calls from TBB workers — are described in their sections as mechanism, not repeated here as complaints. This list is what a reader should still not be surprised by.
+The GPU binary is only the middle of the pipeline. `scripts/` drives the rest, and every defect found in the September 2026 review after the release itself was in here rather than in the CUDA. It is worth a section because none of it is obvious from reading `main.cpp`.
+
+### The shape of a run
+
+```
+run_kegalign  ->  kegalign (the CUDA binary)     writes tmp*.segments, prints lastz commands
+              ->  diagonal_partition.py          splits large .segments files
+              ->  lastz --segments=...           gapped extension, one process per command
+              ->  package_output.py              tars the whole thing for Galaxy
+```
+
+`runner.py` is the conductor. Three `multiprocessing.Manager()` queues carry work between the stages, and each stage ends when it reads as many `SENTINEL_VALUE`s as there are workers — so the sentinel count and the worker count must agree, and both come from `--num_cpu`.
+
+The queues are **manager proxies**, not `queue.Queue` objects, which is why they can cross a `ProcessPoolExecutor` boundary at all. Anything that changes how workers are spawned has to keep that true.
+
+### Ordering is inherited from SegAlign, and was silently lost
+
+The shell script this replaced ran lastz in parallel and then concatenated deterministically:
+
+```bash
+for i in tmp*.plus.*;  do echo $i; done | sort -V
+for i in tmp*.minus.*; do echo $i; done | sort -V
+```
+
+Plus before minus, version-ordered within each. The Python port dropped it: both output paths — the MAF concatenation and the lastz command file that becomes `galaxy/commands.json` — used the order work happened to finish in.
+
+That went unnoticed for a long time because a second bug hid it. `executor.submit(worker(...))` **called** the worker instead of passing it, so every partitioner ran serially in the parent process and completion order was accidentally input order. Fixing the parallelism is what made the missing sort visible.
+
+`KegAlignSegment.__lt__` had encoded the intended order the whole time — `["strand", "tmp", "block", "r", "split"]`, `plus=0`, `minus=1` — and was never called. Its only would-be caller, `KegAlignSegments.__iter__`, returned `self` alongside a `__next__` that was itself a generator function, so iterating it looped forever yielding generator objects. That reads as a half-finished port of `sort -V`: comparison written, iteration broken, call site never wired.
+
+Both paths now go through it, via `sorted_commands()` and `lastz_command_sort_key()`. Nothing is buffered that was not already being read in full; only the final write is ordered.
+
+> **Trap**
+>
+> There are **two** output paths and they are easy to confuse. `sorted_commands()` orders the MAF concatenation; `lastz_command_sort_key()` orders the command file. Fixing one and declaring victory is exactly what happened between v0.3.1's first and second attempts — the MAF was ordered while `commands.json`, which is what Galaxy hands downstream, was not. If you change the ordering rule, change it in both.
+
+### Chunk size is estimated twice, by two different copies
+
+`runner.py:estimate_chunk_size()` and `diagonal_partition.py` each estimate independently, with near-identical code. Both feed `statistics.quantiles()`, which needs **two** data points on Python 3.10–3.12 and one on 3.13+; the conda-forge `kegalign` recipe pins 3.12.
+
+Neither guarded it adequately. `runner.py` checked `< 7` and `diagonal_partition.py` checked `len(files) < 2` — but the latter keys by *prefix*, so the two split files `DELETE_AFTER_CHUNKING` produces are `len(files) == 2` with `len(fdict) == 1`. Either reaches the quantile with too few points and dies with an unhandled `StatisticsError`, after all the GPU work is finished.
+
+> **Trap**
+>
+> `chunk_size == 0` is **meaningful**, not an error. `diagonal_partition.py` documents *"set `<max-segments>` = 0 to skip partitioning"* and implements it by printing the command unchanged. Do not clamp the estimate's lower bound — flooring it at 1 emits one output file and one LASTZ command per segment line, for every file in the run, because the estimate is computed once and applied to all of them.
+
+### Errors from workers are easy to lose
+
+A worker that fails calls `sys.exit()`. While the partitioners were accidentally running in the parent, that ended the run. In a child process it does not: `SystemExit` is marshalled back into the future, and if nothing collects the futures it is simply discarded — the pool shuts down and the function reports success.
+
+Both pools now collect with `as_completed(...).result()`. Note that `SystemExit` is a `BaseException`, so a surrounding `except Exception` will still not catch it; the process exits non-zero carrying the worker's own message, which is the behaviour we want but not via the path the code appears to take.
+
+### How to check any of this
+
+```
+python3 tests/test_chunk_size.py     # imports the real estimator, drives it on temp dirs
+python3 tests/test_output_order.py   # shuffles arrival order, requires a stable result
+```
+
+Both run in CI, need no GPU, and pin Python 3.12 — the behaviour under test is interpreter-dependent, and on 3.13+ the single-data-point case passes even with the fix reverted.
+
+> **Known problem — `scripts/mps-mig/` does not run**
+>
+> `NamedPopen.__init__` forwards `name=` to `subprocess.Popen`, which raises `TypeError` on the first process constructed. `GPU_queue.__len__` referred to a name that exists only as a local in `main()`. Both are fixed, but the harness has never been exercised end to end and is not installed by the conda recipe, so treat it as unverified rather than working.
+
+## 9. Known problems
+
+Everything below is _open_ as of v0.3.1. The defects fixed along the way — the seed-buffer overflow, the discarded scoring-file values, the duplicate segments within an interval, the out-of-range entropy counters, the unbounded seed pattern arrays, the `exit()` calls from TBB workers, and the orchestration bugs in §8 — are described in their sections as mechanism, not repeated here as complaints. This list is what a reader should still not be surprised by.
 
 Ordered roughly by exposure: the first four can change what comes out, the next two are behaviour gaps worth knowing before you are surprised by them, and the last two bound how much the tests can tell you.
 
@@ -636,6 +723,8 @@ _§6 · src/seeder.cpp · changes output · not fixed_
 `drop_duplicate_hsps()` runs at the end of one `seeder_body` call, which covers one interval. Intervals are separate invocations writing separate `.segments` files consumed by separate LASTZ calls, so an HSP found from both sides of an interval boundary is still emitted twice and LASTZ still repeats that gapped extension.
 
 **Exposure:** any query longer than `lastz_interval_size` (10 Mb) — so every real genome, and none of the test data. One boundary per interval against 40 chunks inside it, which is why this is the smaller half of the problem the fix addressed.
+
+**Measured once, and it did not appear.** Setting `lastz_interval_size=100000` forces 15 intervals and 14 boundaries onto the small test pair, without needing a 10 Mb query. On 4× A100 that produced 804 segments across 15 distinct files with **zero** duplicates, within files or across them. That is one input at one interval size, so it does not prove the case cannot arise — but it is the only evidence either way, and it argues the exposure is narrower than the mechanism suggests.
 
 **What it would take:** deduplication after the intervals are joined, which means it can no longer live in the seeder. The natural home is the printer, but the printer receives one interval at a time too.
 
