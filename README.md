@@ -120,10 +120,10 @@ faToTwoBit <(gzip -cdfq ./test-data/orange.fasta.gz) work/query.2bit
 
 The second step, has two sub-steps. First, use KegAlign to generate a list of LASTZ commands to run. Second, adjust this list of LASTZ commands using our diagonal partitioning method. Two ways to complete this step are shown below.
 
-1) You can run the python scripts used by Galaxy to generate a tarball containing the LASTZ commands.
+1) You can run the python scripts used by Galaxy to generate a keg (tarball) containing the LASTZ commands.
 
 ```bash
-# generate the LASTZ tarball
+# generate LASTZ keg
 python ./scripts/runner.py --diagonal-partition --format maf- --num-cpu 16 --num-gpu 1 --output-file data_package.tgz --output-type tarball --tool_directory ./scripts test-data/apple.fasta.gz test-data/orange.fasta.gz
 python ./scripts/package_output.py --output_format maf- --tool_directory ./scripts
 ```
@@ -142,7 +142,7 @@ The ordering follows the LASTZ manual's *Segment File* rules — one query seque
 
 ⚠ **Decompress before use.** LASTZ cannot read a gzipped segments file, and says so only obliquely: `--segments=x.gz` reports `FAILURE: bad field (x.gz: line 1, ...)` and still writes an empty output file.
 
-**Terminology.** A **keg** is one chromosome pair's segments: a single element of the collection above. The whole archive produced by option 1 is a **tarball**, never a keg — this document used "keg" loosely for it until 2026-09-17, which collided with the finer sense once `build_kegs.py` existed.
+⚠ **Naming, unresolved.** A **keg** is the tarball, as it has always been in this project. The per-chromosome-pair files this option emits are *not* kegs and need a name of their own; `build_kegs.py` is misnamed and will be renamed before release.
 
 2) You can run KegAlign followed by our diagonal partitioning python script to generate the list of LASTZ commands.
 
@@ -157,10 +157,10 @@ mv new-lastz-commands.txt lastz-commands.txt
 
 The third step is to use LASTZ to compute the alignment.
 
-If you have a tarball from step 1 above, you can use the python script used by Galaxy to compute the alignment.
+If you have a keg (tarball) from step 1 above, you can use the python script used by Galaxy to compute the alignment.
 
 ```bash
-# run LASTZ over the tarball
+# run LASTZ keg
 python ./scripts/run_lastz_tarball.py --input=data_package.tgz --output=apple_orange.maf --parallel=16
 ```
 
