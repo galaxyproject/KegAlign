@@ -107,14 +107,13 @@ EOF
             --strict-channel-priority \
             --yes \
             "bashlex" \
-            "black" \
             "cmake" \
-            "flake8" \
             "gxx=13" \
             "libboost-devel>=1.88" \
             "mypy" \
             "nvidia-ml-py" \
             "python=3.12" \
+            "ruff" \
             "tbb-devel=2020.2.*" \
             "zlib"
     fi

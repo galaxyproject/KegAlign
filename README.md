@@ -17,6 +17,7 @@ This is a [@galaxyproject](https://github.com/galaxyproject)'s modified fork of 
   - [Alignment](#alignment)
   - [Scoring Options](#scoring)
   - [Output Options](#output)
+- [Implementation notes](#implementation-notes)
 - [Citing KegAlign](#cite_kegalign)
 
 ## <a name="overview"></a> Overview
@@ -66,13 +67,27 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 make
 ```
 ## <a name="dependencies"></a> Dependencies
-The following dependencies are required by KegAlign:
 
-  * [CMake](https://cmake.org/) >= 3.8
+**Installing the package pulls everything in** — this list matters only if you are building from
+source. `./scripts/make-conda-env.bash -dev` creates an environment with all of it.
+
+To build:
+
+  * [CMake](https://cmake.org/) >= 3.10 (`cmake_minimum_required` in `CMakeLists.txt`)
+  * a C++ compiler — the dev environment pins `gxx` 13
+  * CUDA toolkit
   * oneAPI Threading Building Blocks ([oneTBB](https://oneapi-src.github.io/oneTBB/)) [2020.2](https://github.com/oneapi-src/oneTBB/releases/tag/v2020.2)
-  * [Boost C++ Libraries](https://www.boost.org/) >= 1.70
-  * [LASTZ](https://github.com/lastz/lastz) 1.04.22
-  * faToTwoBit (from [UCSC Genome Browser source](https://github.com/ucscGenomeBrowser/kent))
+  * [Boost C++ Libraries](https://www.boost.org/) >= 1.88 — `program_options`
+  * zlib
+  * Python 3.12, and `bashlex` and `nvidia-ml-py` for the runner scripts
+
+At run time the pipeline also needs, all supplied by `kegalign-full`:
+
+  * [LASTZ](https://github.com/lastz/lastz) — KegAlign does not link against it; it writes LASTZ
+    command lines for a later stage to run. No particular version is pinned.
+  * faToTwoBit (from [UCSC Genome Browser source](https://github.com/ucscGenomeBrowser/kent)), to
+    prepare the inputs
+  * samtools, mbuffer
 
 ## <a name="usage"></a> Usage
 
@@ -133,6 +148,19 @@ If you have a keg (tarball) from step 1 above, you can use the python script use
 python ./scripts/run_lastz_tarball.py --input=data_package.tgz --output=apple_orange.maf --parallel=16
 ```
 
+Locally you do not need the tarball at all: `--output-type output` runs the LASTZ commands as they
+are generated, across `--num-cpu` workers, and writes the finished MAF directly. It replaces both
+the tarball step and this one.
+
+```bash
+# generate and align in one step
+python ./scripts/runner.py --diagonal-partition --format maf- --num-cpu 16 --num-gpu 1 --output-file apple_orange.maf --output-type output --tool_directory ./scripts test-data/apple.fasta.gz test-data/orange.fasta.gz
+```
+
+⚠ The two-step form exists for Galaxy, not for convenience: it frees the GPU node as soon as seeding
+finishes, instead of holding it through the much longer CPU stage. On one machine that does not
+matter and the one-step form is simpler.
+
 If you have a list of LASTZ commands from step 2 above, you can compute the alignment.
 
 This runs the LASTZ commands serially.
@@ -146,7 +174,7 @@ bash lastz-commands.txt
 This runs the LASTZ commands using GNU parallel:
 
 ```bash
-# run LAST commands
+# run LASTZ commands
 parallel --max-procs 16 < lastz-commands.txt
 (echo "##maf version=1"; cat *.maf-) > apple_orange.maf
 ```
@@ -159,6 +187,10 @@ diff apple_orange.maf <(gzip -cdfq ./test-data/apple_orange.maf.gz)
 ```
 
 #### Running with MIG/MPS
+
+⚠ **The `scripts/mps-mig/` harness is not installed by the conda package** — it ships only in this
+repository. Clone the source to use this section.
+
 GPU utilization can be increased by using MIG and/or MPS, leading up to 20% faster alignments.
 
 * Preparing inputs
@@ -203,11 +235,17 @@ By default the HOXD70 substitution scores are used (from [Chiaromonte et al. 200
 
 Matrix can be supplied as an input to **--scoring** parameter. Substitution matrix can be inferred from your data using another LASTZ-based tool (LASTZ_D: Infer substitution scores).
 
+⚠ **Changed in 0.3.0.** A supplied scoring file's `bad_score` and `fill_score` are now honoured in
+the gap-free extension stage as well as the gapped one. Earlier versions read both values but applied
+them only to gapped extension, so a custom file was interpreted two different ways within a single
+run. **Results from a custom scoring file are not directly comparable with those from 0.2.2.14 or
+earlier.**
+
 ### <a name="output"></a>Output Options
 
 The default output is a MAF alignment file. Other formats can be selected with the **--format** parameter.  See [LASTZ manual](https://lastz.github.io/lastz/#formats) for description of possible formats.
 
-## Implementation notes
+## <a name="implementation-notes"></a> Implementation notes
 
 [docs/implementation-notes.md](docs/implementation-notes.md) maps the parts of KegAlign
 where the reasoning is not obvious from the code — the compressed alphabet, the seed
