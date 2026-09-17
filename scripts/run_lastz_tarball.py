@@ -38,13 +38,30 @@ lastz_output_format_regex = re.compile(
 # --format=none can be used when no alignment output is desired.
 
 
+def command_succeeded(returncode: int, stderr_file: str | None, stderr_ok: bool) -> bool:
+    """Whether one lastz invocation is to be treated as successful.
+
+    lastz exits 1 with a warning on stderr for conditions we tolerate (see
+    truncation_regex), so rc 1 is survivable *only* when there is a stderr file
+    to judge it by.  With no stderr file there is nothing to tolerate it by, and
+    a nonzero code has to be fatal -- otherwise a genuinely failed command is
+    indistinguishable from a truncated-but-usable one.
+    """
+    if stderr_file is None:
+        return returncode == 0
+
+    return returncode in (0, 1) and stderr_ok
+
+
 def run_command(
     instance: int,
     input_queue: "queue.Queue[dict[str, typing.Any]]",
     output_queue: "queue.Queue[float]",
     debug: bool = False,
-) -> str | None:
+) -> list[str]:
     os.chdir("galaxy/files")
+
+    failures: list[str] = []
 
     # These are not considered errors even though
     # we will end up with a segmented alignment
@@ -55,7 +72,7 @@ def run_command(
         command_dict = input_queue.get()
 
         if not command_dict:
-            return None
+            return failures
 
         args = ["lastz", "--allocate:traceback=1.99G"]
         args.extend(command_dict["args"])
@@ -96,11 +113,39 @@ def run_command(
             except Exception:
                 stderr_ok = False
 
-        if p.returncode in [0, 1] and stderr_ok:
+        if command_succeeded(p.returncode, stderr_file, stderr_ok):
             elapsed = time.perf_counter() - begin
             output_queue.put(elapsed)
         else:
-            return f"command failed (rc={p.returncode}): {' '.join(args)}"
+            failures.append(f"command failed (rc={p.returncode}): {' '.join(args)}")
+
+
+def collect_failures(
+    futures: "typing.Iterable[concurrent.futures.Future[list[str]]]",
+) -> list[str]:
+    """Every failure the workers reported, as messages.
+
+    A worker can fail in three ways and all three must be caught: it can be
+    cancelled, it can raise, or it can run to completion and *return* the
+    commands that failed.  The third is the ordinary case -- a lastz that
+    exits nonzero -- and it leaves the future in exactly the state a healthy
+    one is in, so no predicate over future state alone can see it.
+    """
+    failures = []
+
+    for future in futures:
+        if future.cancelled():
+            failures.append("worker was cancelled")
+            continue
+
+        exception = future.exception()
+        if exception is not None:
+            failures.append(f"worker raised: {exception}")
+            continue
+
+        failures.extend(future.result())
+
+    return failures
 
 
 class BatchTar:
@@ -322,15 +367,10 @@ class TarRunner:
                     for instance in range(self.parallel)
                 ]
 
-            found_falures = False
+            failures = collect_failures(concurrent.futures.as_completed(futures))
 
-            for f in concurrent.futures.as_completed(futures):
-                result = f.result()
-                if result is not None:
-                    print(f"lastz: {result}", file=sys.stderr, flush=True)
-
-                if not f.done() or f.cancelled() or f.exception() is not None:
-                    found_falures = True
+            for failure in failures:
+                print(f"lastz: {failure}", file=sys.stderr, flush=True)
 
             while not output_queue.empty():
                 run_time = output_queue.get()
@@ -338,8 +378,8 @@ class TarRunner:
                 if self.debug:
                     print(f"lastz took {run_time}", file=sys.stderr, flush=True)
 
-            if found_falures:
-                sys.exit("lastz command failed")
+            if failures:
+                sys.exit(f"{len(failures)} lastz command(s) failed")
 
         elapsed = time.perf_counter() - begin
 

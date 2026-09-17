@@ -42,6 +42,9 @@ jobs:
 
       - name: MAF output order is deterministic
         run: python tests/test_output_order.py
+
+      - name: a failed lastz command is fatal
+        run: python tests/test_lastz_failure_propagation.py
       - name: ruff
         run: |
           pipx run ruff check scripts tests
