@@ -226,7 +226,15 @@ def verify(args: argparse.Namespace) -> int:
     if not selected:
         sys.exit(f"no commands for pair {args.pair}")
     selected.sort(key=lambda c: arg_value(c["args"], "--output=") or "")
-    if args.max_splits:
+    if args.smallest:
+        # ⚠ Selecting the SMALLEST splits, not the first N. A whole chromosome pair is 86-256 MB
+        # of segments and takes hours in one lastz; the merge property is the same code path at
+        # any size, so a size-bounded selection answers it in minutes. The selection is still
+        # returned in command order, so the keg is built exactly as it would be in production.
+        by_size = sorted(selected, key=lambda c: (workdir / arg_value(c["args"], "--segments=")).stat().st_size)
+        keep = {id(c) for c in by_size[: args.smallest]}
+        selected = [c for c in selected if id(c) in keep]
+    elif args.max_splits:
         selected = selected[: args.max_splits]
     print(f"pair {want_target} x {want_query}: {len(selected)} split(s)", file=sys.stderr)
 
@@ -366,7 +374,8 @@ def main() -> int:
     parser.add_argument("--verify", action="store_true", help="compare a keg against its splits with real lastz")
     parser.add_argument("--bundle", help="extracted bundle, for --verify")
     parser.add_argument("--pair", help="TARGET,QUERY to verify, e.g. EH23a.chr9,EH23b.chrX")
-    parser.add_argument("--max-splits", type=int, default=0, help="limit splits in --verify (0 = all)")
+    parser.add_argument("--max-splits", type=int, default=0, help="first N splits in --verify (0 = all)")
+    parser.add_argument("--smallest", type=int, default=0, help="the N SMALLEST splits, for a quick --verify")
     parser.add_argument("--lastz", default="lastz")
     parser.add_argument("--tmpdir", default=None)
     parser.add_argument("--self-test", action="store_true")
