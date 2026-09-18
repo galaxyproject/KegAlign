@@ -45,6 +45,13 @@ jobs:
 
       - name: a failed lastz command is fatal
         run: python tests/test_lastz_failure_propagation.py
+
+      # ⚠ This suite EXISTED AND RAN NOWHERE. build_pairs.py has carried a --self-test since the
+      # pair-file work landed -- the ordering rules a pair file's legality rests on are asserted
+      # there and only there -- but no CI step invoked it, so it could rot silently.
+      - name: build_pairs.py grouping and batching invariants
+        run: python scripts/build_pairs.py --self-test
+
       - name: ruff
         run: |
           pipx run ruff check scripts tests

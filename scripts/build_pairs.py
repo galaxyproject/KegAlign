@@ -6,7 +6,9 @@ chromosome pair, BOTH strands, in a single gzipped segments file. `--output-type
 emits one pair file per element instead of tarring all the splits into `data_package.tgz`.
 
     build_pairs.py --commands lastz-commands.txt --segments-dir . --out pairs/
+    build_pairs.py --commands lastz-commands.txt --out pairs/ --batch-lines 2000000 --query-2bit query.2bit
     build_pairs.py --verify --bundle /path/to/extracted --lastz /path/to/lastz --pair EH23a.chr9,EH23b.chrX
+    build_pairs.py --verify-batches --bundle /path/to/extracted --smallest 24
     build_pairs.py --self-test
 
 ⛔ WHY THIS IS SAFE -- the lastz 1.04.52 manual, "Segment File", is the whole specification:
@@ -32,6 +34,33 @@ previous one, so an interleaved file yields one run per line and every line stil
 right writer. What was wrong is the stated reason, which is the more dangerous half -- a reader who
 believed it would think a cheaper grouping was safe.
 
+▶ `--batch-lines` PACKS SEVERAL QUERIES INTO ONE FILE, and the same three rules are what make it
+legal. One file per chromosome pair makes the element count scale with the QUERY'S SEQUENCE COUNT,
+which is fine for ten chromosomes and ruinous for a contig-level assembly: a 300,000-contig query
+would emit a Galaxy element per contig per target chromosome. Batching emits queries in query-file
+order (rule 1), each query's plus lines before its minus lines (rule 2), and stops splitting by
+target (rule 3) -- so the count is chosen rather than inherited. `read_2bit_order` supplies the
+order. Nothing about a single-query pair file changes; `--batch-lines 0` is the default and its
+output is unchanged.
+
+⚠ WHICH OF THOSE RULES LASTZ ACTUALLY ENFORCES, measured on lastz 1.04.52 against a 6-target x
+25-query fixture carrying 256 anchors on both strands, each perturbation run through
+`growler_lastz`'s own command line (2bit inputs, `[multiple]` target, gzipped pair file, no
+`--strand`):
+
+    query order correct          identical MAF blocks       0 errors
+    query order REVERSED         no output at all           FAILURE: extra segments in file
+                                                            "(for this usage segments must appear
+                                                             in the same order as the query file...)"
+    minus written before plus    identical MAF blocks       0 errors
+    strands fully interleaved    identical MAF blocks       0 errors
+
+So the QUERY-ORDER rule is load-bearing and fails LOUDLY -- an out-of-order batch produces no
+alignments and a non-zero exit, not a quiet subset. The STRAND-ORDER rule was not enforced at all
+here, which is what the manual's "normally" is doing. ⛔ IT IS STILL OBEYED: it costs nothing to
+emit, one fixture on one build is not grounds to overturn a documented contract, and the whole
+reason this file writes plus-then-minus is so the consumer can drop `--strand` entirely.
+
 ⚠ MEASURED, NOT ASSUMED. Over all 5,177 splits of a real bundle: 0 span more than one QUERY
 sequence, 0 have a query name recurring after another, 35 span more than one TARGET. An earlier
 150-file sample found zero exceptions and was reported as "zero" -- at a 0.68% rate a sample
@@ -55,6 +84,7 @@ import json
 import pathlib
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -155,15 +185,146 @@ def split_by_target(lines: list[str]) -> list[tuple[str, list[str]]]:
 def query_of(lines: list[str]) -> str:
     """The single query name in a segment file.
 
-    ⛔ Raises if there is more than one. A pair file spanning two query sequences would violate the
-    manual's ordering rule, and this is the one invariant that cannot be repaired by reordering
-    here -- it would need a sort against the 2bit's sequence order, which this script does not
-    have. Failing loudly is correct; silently emitting an illegal pair file is not.
+    ⛔ Raises if there is more than one, and that is about the INPUT split, not the output file.
+    KegAlign emits one query per split (measured: 0 of 5,177 span two), so a split that holds more
+    is a malformed bundle rather than a case to accommodate -- there is no evidence about what
+    order its lines would be in, and inventing one is how a silent wrong answer starts.
+
+    ⚠ THIS IS NO LONGER WHAT LIMITS A PAIR FILE TO ONE QUERY. It used to be: the reason given here
+    was that repairing the order "would need a sort against the 2bit's sequence order, which this
+    script does not have". It does now -- `read_2bit_order` -- and `batch_pairs` uses it to put
+    many queries in one file. This check stays because a multi-query SPLIT is still a bug upstream.
     """
     names = {line.split("\t")[3] for line in lines}
     if len(names) != 1:
         raise ValueError(f"split spans {len(names)} query sequences: {sorted(names)}")
     return names.pop()
+
+
+def read_2bit_order(path: pathlib.Path) -> list[str]:
+    """Sequence names in the order the `.2bit` stores them -- the order lastz will read them in.
+
+    ⛔ THIS IS PARSED, NOT SHELLED OUT TO `twoBitInfo`. The order is a CORRECTNESS input to
+    batching (see `batch_pairs`), and a batch written against the wrong order is silently wrong
+    rather than loudly broken. Adding a runtime dependency on a UCSC binary to obtain it would
+    also put the one number that matters behind a tool the conda package does not install.
+
+    The format is fixed and small: a 16-byte header (magic, version, sequenceCount, reserved)
+    then `sequenceCount` index records of `nameSize:uint8, name, offset:uint32`. Byte order is
+    whichever way the magic reads, which is how `twoBitInfo` itself decides.
+    """
+    blob = path.read_bytes()
+    if len(blob) < 16:
+        raise ValueError(f"{path}: too short to be a 2bit file ({len(blob)} bytes)")
+    for endian in ("<", ">"):
+        magic, version, count, _reserved = struct.unpack_from(endian + "4I", blob, 0)
+        if magic == 0x1A412743:
+            break
+    else:
+        raise ValueError(f"{path}: not a 2bit file (magic {blob[:4]!r})")
+    # ⚠ version 1 moves the index offsets to 64 bits. Nothing in this project writes one, and
+    # reading it as 32-bit would yield plausible-looking garbage, so refuse rather than guess.
+    if version != 0:
+        raise ValueError(f"{path}: 2bit version {version} is not supported (only 0)")
+    names: list[str] = []
+    pos = 16
+    for _ in range(count):
+        size = blob[pos]
+        pos += 1
+        names.append(blob[pos : pos + size].decode())
+        pos += size + 4
+    return names
+
+
+def batch_pairs(
+    pair_files: dict[PairKey, dict[str, list[str]]], query_order: list[str], max_lines: int
+) -> list[tuple[str, list[str]]]:
+    """Pack whole query sequences into as few legal segment files as possible.
+
+    Returns `[(identifier, lines), ...]`. One query is never split across two batches, so a query
+    whose own segments exceed `max_lines` simply becomes an oversized batch of one.
+
+    ⚠ THIS IS THE BUFFERED ORACLE, NOT THE PRODUCTION WRITER -- `stream_batches` is what runs, for
+    the same reason `stream_pairs` replaced `write_pairs`. It is kept because `--verify-batches`
+    and the self-test compare the two, which is what makes the streaming one checkable at all.
+
+    ▶ WHY THIS IS LEGAL, and why it is the SAME specification the one-query form rests on. The
+    lastz 1.04.52 manual, "Segment File", imposes exactly three things:
+
+        Query sequence names must appear in the same order as they do in the query file. For each
+        query sequence, normally all positive strand intervals must appear before any negative
+        strand intervals. Sequence names for the target may appear in any order, and are only
+        meaningful if the `multiple` action is used.
+
+    A batch emits queries in `query_order` (rule 1), and each query's plus lines before its minus
+    lines (rule 2). Rule 3 is why the per-target split is DROPPED here rather than preserved: it
+    was never required, and `growler_lastz` already passes `target.2bit[multiple]` with the whole
+    2bit and no `subset=`. Splitting by target multiplied the element count by the target's
+    chromosome count for no gain.
+
+    ⛔ EVERY QUERY MUST APPEAR IN `query_order`. A query the order does not name cannot be placed,
+    and guessing its position is precisely the silent-wrongness this function exists to avoid.
+    """
+    by_query: dict[str, dict[str, list[str]]] = collections.defaultdict(lambda: {"+": [], "-": []})
+    for key in sorted(pair_files, key=lambda k: k.identifier):
+        for strand in ("+", "-"):
+            by_query[key.query][strand].extend(pair_files[key][strand])
+    counts = collections.Counter({name: len(pair_lines(strands)) for name, strands in by_query.items()})
+    return [
+        (identifier, [line for name in names for line in pair_lines(by_query[name])])
+        for identifier, names in batch_plan(query_order, counts, max_lines)
+    ]
+
+
+def batch_plan(
+    query_order: list[str], query_lines: collections.Counter[str], max_lines: int
+) -> list[tuple[str, list[str]]]:
+    """Which queries share a batch, and what each batch is called. `[(identifier, [query, ...])]`.
+
+    Pure, and separated from both writers for exactly that reason: the boundaries and the names
+    are the part that has to be identical between the buffered oracle and the streaming writer,
+    and the only way to be sure of that is for there to be one copy of it.
+
+    ⛔ A BATCH IS NAMED FOR ITS FIRST QUERY, NOT ITS POSITION. `batch00000`, `batch00001`, ... look
+    tidier and are a trap: add one query sequence anywhere and every boundary after it shifts, so
+    the same name means a different thing between two runs. That breaks job caching, breaks resume,
+    and makes a diff of two runs meaningless -- silently, because the names still line up. A first
+    query name is stable under any change elsewhere in the genome, and it is unique by construction
+    because each query lands in exactly one batch.
+
+    ⚠ IT ALSO CHANGES THE DISCOVERY ORDER, which Galaxy takes as ASCII over identifiers. Batches
+    then arrive in ASCII order of their first query rather than in query-file order. Nothing
+    downstream depends on that -- the lastz ordering rules are WITHIN a file, and MAF/AXT blocks
+    from different batches are independent -- but a consumer that assumed element order was genome
+    order would be wrong, and would have been wrong about `batch00000` too, just less visibly.
+
+    ⛔ EVERY QUERY MUST APPEAR IN `query_order`. A query the order does not name cannot be placed,
+    and guessing its position is precisely the silent-wrongness batching exists to avoid.
+    """
+    unplaceable = sorted(set(query_lines) - set(query_order))
+    if unplaceable:
+        raise ValueError(
+            f"{len(unplaceable)} query sequence(s) are absent from the query order and cannot be "
+            f"placed: {unplaceable[:5]}"
+        )
+    plan: list[tuple[str, list[str]]] = []
+    current: list[str] = []
+    current_lines = 0
+    for name in query_order:
+        n = query_lines.get(name, 0)
+        if n == 0:
+            continue
+        # ⚠ The test is on the batch SO FAR, so a single query larger than max_lines becomes an
+        # oversized batch of one rather than being split. Splitting it would put half a query's
+        # plus intervals after the other half's minus intervals, which lastz rejects.
+        if current and current_lines + n > max_lines:
+            plan.append((current[0], current))
+            current, current_lines = [], 0
+        current.append(name)
+        current_lines += n
+    if current:
+        plan.append((current[0], current))
+    return plan
 
 
 def assign(
@@ -200,24 +361,29 @@ def pair_lines(strands: dict[str, list[str]]) -> list[str]:
     return strands["+"] + strands["-"]
 
 
-def write_pairs(
-    pair_files: dict[PairKey, dict[str, list[str]]], out_dir: pathlib.Path, compresslevel: int = COMPRESSLEVEL
+def write_elements(
+    elements: list[tuple[str, list[str]]], out_dir: pathlib.Path, compresslevel: int = COMPRESSLEVEL
 ) -> list[tuple[str, int, int]]:
-    """⚠ THE BUFFERED REFERENCE IMPLEMENTATION. `stream_pairs` is what runs; see its docstring.
+    """Write `[(identifier, lines)]` as one gzipped segments file each.
 
-    Kept because it is the ORACLE: `--compare` runs both over the same input and asserts the pair
-    files agree, so this function is what makes the streaming one checkable. Do not call it on a
-    real bundle -- with `assign` it needs roughly twice the bundle's segment bytes in RAM.
+    Both shapes land here -- one file per chromosome pair, and one file per query batch -- so the
+    gzip level, the `.segments.gz` suffix and the manifest have a single definition.
+
+    ⚠ IT IS THE BUFFERED REFERENCE IMPLEMENTATION, NOT THE PRODUCTION WRITER. On the per-pair
+    shape `stream_pairs` is what runs; see its docstring. This one is kept because it is the
+    ORACLE -- `--compare` runs both over the same input and asserts the pair files agree -- and
+    because batching has no streaming form (a batch is defined by whole queries, so it cannot be
+    emitted until the query is complete). Do not call it on a real bundle with `assign`: that
+    needs roughly twice the bundle's segment bytes in RAM, and was OOM-killed on 15 GB.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest: list[tuple[str, int, int]] = []
-    for key in sorted(pair_files, key=lambda k: k.identifier):
-        lines = pair_lines(pair_files[key])
-        path = out_dir / f"{key.identifier}.segments.gz"
+    for identifier, lines in elements:
+        path = out_dir / f"{identifier}.segments.gz"
         payload = "".join(line + "\n" for line in lines).encode()
         with gzip.open(path, "wb", compresslevel=compresslevel) as fh:
             fh.write(payload)
-        manifest.append((key.identifier, len(lines), path.stat().st_size))
+        manifest.append((identifier, len(lines), path.stat().st_size))
     return manifest
 
 
@@ -337,6 +503,76 @@ def stream_pairs(
     ]
 
 
+def stream_batches(
+    commands: list[dict[str, typing.Any]],
+    read_segments: typing.Callable[[str], list[str]],
+    out_dir: pathlib.Path,
+    query_order: list[str],
+    max_lines: int,
+    *,
+    compresslevel: int = COMPRESSLEVEL,
+) -> list[tuple[str, int, int]]:
+    """Write query batches WITHOUT holding the bundle in memory -- `stream_pairs` for the batched shape.
+
+    ⛔ WHY THIS EXISTS AT ALL. `batch_pairs` needs `assign`, which holds every segment line of the
+    whole bundle in RAM: measured peak RSS = 52.4 MB + 1.96 x (input MB), extrapolating to ~28 GB
+    for a 14.15 GB bundle, and OOM-killed on a 15 GB machine. That is the defect `stream_pairs`
+    was written to remove, and a batched path built on `assign` would reintroduce it on exactly
+    the shape intended for production.
+
+    ▶ THE PASS ORDER IS THE ORDERING RULE, ONE LEVEL DOWN FROM `stream_pairs`. There, the outer
+    loop is the strand. Here it CANNOT be: a batch holds several queries, and a strand-outermost
+    pass would write Q1+ Q2+ Q1- Q2-, so each query name recurs non-contiguously and rule 1 is
+    broken. lastz enforces rule 1 loudly -- a query out of order exits 1 -- so the loops are
+    query-outermost, strand-inner: Q1+ Q1- Q2+ Q2-.
+
+    ⚠ IT READS THE INPUT THREE TIMES, not twice. Batch boundaries depend on each query's total
+    line count, and a boundary has to be known before the first line of that batch is written, so
+    an indexing pass comes first. It keeps counts, never lines, so its memory is one split. Three
+    passes over local disk is minutes against the hours of lastz that follow, and the alternative
+    is the 28 GB.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- pass 1: which query each split belongs to, and how many lines it contributes ---
+    by_query: dict[str, list[dict[str, typing.Any]]] = collections.defaultdict(list)
+    query_lines: collections.Counter[str] = collections.Counter()
+    for command in commands:
+        segments = arg_value(command.get("args", []), "--segments=")
+        if segments is None:
+            continue
+        lines = read_segments(segments)
+        if not lines:
+            continue
+        # ⚠ `query_of` raises on a split spanning two queries. Measured over all 5,177 splits of a
+        # real bundle: none do. It is a bug upstream if one ever does, not a case to handle here.
+        by_query[query_of(lines)].append(command)
+        query_lines[query_of(lines)] += len(lines)
+
+    manifest: list[tuple[str, int, int]] = []
+    for identifier, names in batch_plan(query_order, query_lines, max_lines):
+        path = out_dir / f"{identifier}.segments.gz"
+        written = 0
+        # `mtime=0` for the same reason as in `stream_pairs`: the bytes are then a function of the
+        # content alone, so two runs produce identical files and can be compared as bytes.
+        with gzip.GzipFile(filename=path, mode="wb", compresslevel=compresslevel, mtime=0) as handle:
+            for name in names:
+                for wanted in STRAND_ORDER:
+                    for command in by_query[name]:
+                        args = command["args"]
+                        if strand_of(args) not in ("both", wanted):
+                            continue  # nothing of this command belongs to this pass
+                        strand_of_line = _line_strand(args)
+                        for line in read_segments(require_arg(args, "--segments=")):
+                            if strand_of_line(line) != wanted:
+                                continue
+                            handle.write(line.encode())
+                            handle.write(b"\n")
+                            written += 1
+        manifest.append((identifier, written, path.stat().st_size))
+    return manifest
+
+
 def payload_digests(out_dir: pathlib.Path) -> dict[str, tuple[str, int]]:
     """`identifier -> (md5 of the DECOMPRESSED payload, line count)` for every pair file.
 
@@ -416,9 +652,23 @@ def compare_implementations(
     return not complaints, complaints
 
 
+def write_pairs(
+    pair_files: dict[PairKey, dict[str, list[str]]], out_dir: pathlib.Path, compresslevel: int = COMPRESSLEVEL
+) -> list[tuple[str, int, int]]:
+    return write_elements(
+        [(key.identifier, pair_lines(pair_files[key])) for key in sorted(pair_files, key=lambda k: k.identifier)],
+        out_dir,
+        compresslevel,
+    )
+
+
 # --------------------------------------------------------------------------------------- verify
 
 MAF_BLOCK_START = re.compile(r"^a score=")
+
+#: A lastz sequence-file ACTION restricting a 2bit to the names in a file, e.g.
+#: `query.2bit[subset=query_block0.name]`. `--verify-batches` strips it; see there for why.
+SUBSET_ACTION = re.compile(r"\[subset=[^\]]*\]")
 
 
 def maf_blocks(path: pathlib.Path) -> collections.Counter[tuple[str, ...]]:
@@ -555,49 +805,167 @@ def verify(args: argparse.Namespace) -> int:
         f"{f'splits ({len(selected)} lastz)':<22}{sum(per_split.values()):>10,}{split_seconds:>10.1f}", file=sys.stderr
     )
 
-    # ⛔ COMPARE BY LOCUS, NOT BY BLOCK TEXT. lastz's own manual warns that the same alignment
-    # may come back with "minor variations such as shifting of equally-scoring gap placements".
-    # Two runs can therefore emit the same alignment -- same score, same target and query
-    # coordinates, same length -- as different STRINGS. Comparing full block text calls that a
-    # difference, which on a 238,076-segment pair file reported three alignments as "missing from the
-    # pair file" when every one of them was present. The locus is the thing that has to match.
-    def locus(b: tuple[str, ...]) -> tuple[str, str, str]:
-        return (b[0], b[1].split()[2], b[2].split()[2])
+    return compare_loci("pair file", per_pair, f"splits ({len(selected)})", per_split)
 
-    pair_loci = collections.Counter(locus(b) for b in per_pair.elements())
-    split_loci = collections.Counter(locus(b) for b in per_split.elements())
 
-    lost = set(split_loci) - set(pair_loci)
-    gained = set(pair_loci) - set(split_loci)
-    # ▶ AND THE DUPLICATES ARE A FINDING ABOUT THE SPLIT PATH, NOT ABOUT THE KEG. When anchors
-    # for one alignment fall in two different splits, each process finds it independently and
-    # both report it. One lastz sees them together and reports it once, so a pair file DEDUPLICATES
-    # what the current production path emits twice.
-    dup_splits = {k: v for k, v in split_loci.items() if v > 1}
-    dup_pair = {k: v for k, v in pair_loci.items() if v > 1}
+def verify_batches(args: argparse.Namespace) -> int:
+    """Run lastz once per pair file and once per BATCH, and compare the alignments.
+
+    ⛔ THE CLAIM `--batch-lines` RESTS ON, tested the way `--verify` tests the pair file: against
+    real data and real lastz rather than argued from the manual. Packing several queries into one
+    segment file is only legitimate if it changes nothing about what comes out.
+
+    ▶ WHY IT LIVES HERE RATHER THAN IN A SCRATCH DIRECTORY. The evidence for batching was a
+    harness nobody else had, in a directory that does not survive the sandbox, quoted in a commit
+    message on an unmerged branch. A claim that cannot be re-run by the next person is a claim
+    with no evidence a month later.
+
+    ⚠ It needs a real lastz and a real bundle, so it SKIPS when the binary is absent rather than
+    failing -- a CI run without lastz should not go red over a gate it cannot execute. The
+    self-test's own batched gate (`stream_batches` against `batch_pairs`) is what runs everywhere.
+    """
+    lastz_path = shutil.which(args.lastz)
+    if lastz_path is None:
+        print(f"skip - no lastz on PATH as {args.lastz!r}; nothing to verify", file=sys.stderr)
+        return 0
+
+    bundle = pathlib.Path(args.bundle).resolve()
+    workdir = bundle / "galaxy" / "files"
+    commands = [
+        json.loads(line) for line in (bundle / "galaxy" / "commands.json").read_text().splitlines() if line.strip()
+    ]
+
+    def read_segments(name: str) -> list[str]:
+        return (workdir / name).read_text().splitlines()
+
+    selected = [c for c in commands if arg_value(c["args"], "--segments=") is not None]
+    selected.sort(key=lambda c: arg_value(c["args"], "--output=") or "")
+    if args.smallest:
+        # ⚠ The SMALLEST splits, not the first N -- and across every query, not one pair, because
+        # a selection confined to one query cannot produce a batch that holds two. Whether merging
+        # changes the answer is the same code path at any size.
+        by_size = sorted(selected, key=lambda c: (workdir / require_arg(c["args"], "--segments=")).stat().st_size)
+        keep = {id(c) for c in by_size[: args.smallest]}
+        selected = [c for c in selected if id(c) in keep]
+    if not selected:
+        sys.exit("no commands with segments in this bundle")
+
+    # ⛔ THE `subset=` ACTIONS MUST GO, ON BOTH ARMS. A production split names a block file --
+    # `query.2bit[subset=query_block0.name]` -- and a batch deliberately spans blocks, so the
+    # subset of whichever split happened to be first would hide part of every batch. Dropping it
+    # is the measured-safe move: with the whole 2bit the output is byte-identical (md5
+    # 8e060801bfbb, 1,308,851 bytes) at +888 MB peak RSS and +25% time, and it is what
+    # `growler_lastz` does in production. Both arms get the same specs, or the comparison is
+    # between two different experiments.
+    def whole_2bit(spec: str) -> str:
+        return SUBSET_ACTION.sub("", spec)
+
+    query_spec = whole_2bit(require_arg(selected[0]["args"], "--query="))
+    query_2bit = pathlib.Path(args.query_2bit) if args.query_2bit else workdir / query_spec.split("[")[0]
+    order = read_2bit_order(query_2bit)
+
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="batch_verify_", dir=args.tmpdir))
+    pairs = stream_pairs(selected, read_segments, tmp / "pairs")
+    batch_lines = args.batch_lines or sum(n for _, n, _ in pairs)
+    batches = stream_batches(selected, read_segments, tmp / "batches", order, batch_lines)
+
+    # ⛔ THE TEST MUST BE ABLE TO SAY SOMETHING. If every batch holds one query, the two arms are
+    # the same files under different names and the comparison passes without testing anything.
+    # This is the failure mode a green run would otherwise hide, so it is checked before lastz is
+    # paid for, not after.
+    def queries_in(identifier: str) -> set[str]:
+        with gzip.open(tmp / "batches" / f"{identifier}.segments.gz", "rt") as handle:
+            return {line.split("\t")[3] for line in handle if line.strip()}
+
+    packed = max((len(queries_in(i)) for i, _, _ in batches), default=0)
+    print(
+        f"{len(selected)} split(s) -> {len(pairs)} pair file(s) -> {len(batches)} batch(es); "
+        f"largest batch holds {packed} query sequence(s)",
+        file=sys.stderr,
+    )
+    if packed < 2:
+        print(
+            "not ok - no batch holds more than one query, so this run does not test batching. "
+            "Raise --smallest, or lower --batch-lines.",
+            file=sys.stderr,
+        )
+        return 1
+
+    target_spec = whole_2bit(require_arg(selected[0]["args"], "--target="))
+    shared = [
+        a
+        for a in selected[0]["args"]
+        if not a.startswith(("--target=", "--query=", "--segments=", "--output=", "--strand=", "--format="))
+    ]
+
+    def arm(manifest: list[tuple[str, int, int]], subdir: str) -> collections.Counter[tuple[str, ...]]:
+        blocks: collections.Counter[tuple[str, ...]] = collections.Counter()
+        for identifier, _, _ in manifest:
+            plain = tmp / f"{subdir}.{identifier}.segments"
+            with gzip.open(tmp / subdir / f"{identifier}.segments.gz", "rb") as src, plain.open("wb") as dst:
+                shutil.copyfileobj(src, dst)  # the consumer's gunzip step, in miniature
+            out = tmp / f"{subdir}.{identifier}.maf-"
+            run_lastz(args.lastz, target_spec, query_spec, plain, out=out, extra=shared, workdir=workdir)
+            blocks += maf_blocks(out)
+        return blocks
+
+    return compare_loci(
+        f"batches ({len(batches)})", arm(batches, "batches"), f"pair files ({len(pairs)})", arm(pairs, "pairs")
+    )
+
+
+def locus_of(block: tuple[str, ...]) -> tuple[str, str, str]:
+    """A MAF block reduced to what must match: (score line, target start, query start).
+
+    ⛔ THIS IS WHY THE COMPARISON IS NOT ON BLOCK TEXT. lastz's own manual warns that the same
+    alignment may come back with "minor variations such as shifting of equally-scoring gap
+    placements", so two runs can emit one alignment -- same score, same coordinates, same length --
+    as two different STRINGS. Comparing full block text calls that a difference, which on a
+    238,076-segment pair file reported three alignments as "missing from the pair file" when every
+    one of them was present.
+    """
+    return (block[0], block[1].split()[2], block[2].split()[2])
+
+
+def compare_loci(
+    label_a: str,
+    blocks_a: collections.Counter[tuple[str, ...]],
+    label_b: str,
+    blocks_b: collections.Counter[tuple[str, ...]],
+) -> int:
+    """Report whether two lastz arms found the same alignments. 0 if they did.
+
+    Shared by every `--verify` mode, because the thing each of them is really asserting is the
+    same one: regrouping the SAME anchor segments into different files changes which process
+    finds an alignment, and must not change whether one is found.
+    """
+    loci_a = collections.Counter(locus_of(b) for b in blocks_a.elements())
+    loci_b = collections.Counter(locus_of(b) for b in blocks_b.elements())
+
+    lost = set(loci_b) - set(loci_a)
+    gained = set(loci_a) - set(loci_b)
+    # ▶ DUPLICATES ARE A FINDING, NOT AN ERROR. When the anchors for one alignment fall in two
+    # different files, each lastz finds it independently and both report it; one lastz that sees
+    # them together reports it once. So the side with fewer files DE-DUPLICATES what the other
+    # emits twice, and the locus sets still agree.
+    dup_a = {k: v for k, v in loci_a.items() if v > 1}
+    dup_b = {k: v for k, v in loci_b.items() if v > 1}
 
     print(f"\n{'':<22}{'blocks':>10}{'loci':>10}", file=sys.stderr)
-    print(f"{'pair file':<22}{sum(pair_loci.values()):>10,}{len(pair_loci):>10,}", file=sys.stderr)
-    print(f"{'splits':<22}{sum(split_loci.values()):>10,}{len(split_loci):>10,}", file=sys.stderr)
-    if dup_splits or dup_pair:
-        print(
-            f"\nloci reported more than once: splits {len(dup_splits)} "
-            f"(+{sum(v - 1 for v in dup_splits.values())} blocks), pair file {len(dup_pair)}",
-            file=sys.stderr,
-        )
+    print(f"{label_a:<22}{sum(loci_a.values()):>10,}{len(loci_a):>10,}", file=sys.stderr)
+    print(f"{label_b:<22}{sum(loci_b.values()):>10,}{len(loci_b):>10,}", file=sys.stderr)
 
     if not lost and not gained:
-        extra = sum(v - 1 for v in dup_splits.values())
-        print(
-            f"\nok - identical alignment loci; the pair file de-duplicates {extra} block(s) the splits report twice",
-            file=sys.stderr,
-        )
+        extra_a = sum(v - 1 for v in dup_a.values())
+        extra_b = sum(v - 1 for v in dup_b.values())
+        note = f"; duplicate blocks: {label_a} {extra_a}, {label_b} {extra_b}" if (extra_a or extra_b) else ""
+        print(f"\nok - identical alignment loci{note}", file=sys.stderr)
         return 0
-    print(f"\nnot ok - {len(lost)} locus/loci only in the splits, {len(gained)} only in the pair file", file=sys.stderr)
+    print(f"\nnot ok - {len(lost)} locus/loci only in {label_b}, {len(gained)} only in {label_a}", file=sys.stderr)
     for loc in list(lost)[:3]:
-        print("  split-only locus:", loc, file=sys.stderr)
+        print(f"  {label_b}-only locus:", loc, file=sys.stderr)
     for loc in list(gained)[:3]:
-        print("  pair file-only locus  :", loc, file=sys.stderr)
+        print(f"  {label_a}-only locus:", loc, file=sys.stderr)
     return 1
 
 
@@ -668,6 +1036,159 @@ def self_test() -> int:
         pair_lines(from_file[PairKey("T1", "Q1")]),
         pair_lines(from_cmds[PairKey("T1", "Q1")]),
     )
+
+    # ▶ QUERY BATCHING. The invariant under test is the manual's first rule: queries appear in
+    # QUERY-FILE order, whatever order the pair files were keyed in. `assign` keys them
+    # alphabetically, so an order that is deliberately NOT alphabetical is the only honest fixture.
+    #
+    # ⚠ ONE SPLIT STILL HOLDS ONE QUERY, and `query_of` still refuses otherwise. That invariant is
+    # about KegAlign's INPUT splits (measured: 0 of 5,177 span two queries) and is untouched. What
+    # batching relaxes is the OUTPUT file, which the manual never restricted to one query.
+    order = ["Qc", "Qa", "Qb"]
+    splits = {
+        "a": [seg("T1", "Qa", "+", 1), seg("T1", "Qa", "-", 2)],
+        "b": [seg("T2", "Qb", "+", 3)],
+        "c": [seg("T1", "Qc", "+", 4)],
+    }
+    keyed = assign([{"args": [f"--segments={n}"]} for n in ("a", "b", "c")], lambda n: splits[n])
+    one = batch_pairs(keyed, order, max_lines=100)
+    check("a generous batch size yields one element", [i for i, _ in one], ["Qc"])
+    check(
+        "queries are emitted in QUERY-FILE order, not key order",
+        [ln.split("\t")[3] for ln in one[0][1]],
+        ["Qc", "Qa", "Qa", "Qb"],
+    )
+    check(
+        "  and within a query, plus still precedes minus",
+        [ln.split("\t")[6] for ln in one[0][1] if ln.split("\t")[3] == "Qa"],
+        ["+", "-"],
+    )
+    check("  and a batch may span several targets", sorted({ln.split("\t")[0] for ln in one[0][1]}), ["T1", "T2"])
+
+    # a batch boundary never falls inside a query: Qa owns two lines and they stay together
+    split = batch_pairs(keyed, order, max_lines=2)
+    check("a tight batch size splits into several elements", len(split) > 1, True)
+    check("no line is lost across batches", sum(len(v) for _, v in split), 4)
+    for identifier, lines in split:
+        names = [ln.split("\t")[3] for ln in lines]
+        check(f"  {identifier} holds whole queries only", names == sorted(names, key=order.index), True)
+    owners: dict[str, set[int]] = collections.defaultdict(set)
+    for i, (_, lines) in enumerate(split):
+        for ln in lines:
+            owners[ln.split("\t")[3]].add(i)
+    check(
+        "every query lands in exactly ONE batch",
+        {q: len(v) for q, v in sorted(owners.items())},
+        {"Qa": 1, "Qb": 1, "Qc": 1},
+    )
+    check(
+        "  concatenating the batches reproduces the single-batch order",
+        [ln for _, lines in split for ln in lines],
+        one[0][1],
+    )
+
+    # ⛔ a query the order cannot place must raise rather than be guessed at
+    try:
+        batch_pairs(keyed, ["Qa", "Qb"], max_lines=100)
+        check("an unplaceable query must raise", "no raise", "ValueError")
+    except ValueError:
+        check("an unplaceable query must raise", "ValueError", "ValueError")
+
+    # ⛔ THE NAMES MUST BE STABLE UNDER AN INSERTION ELSEWHERE. This is the whole reason a batch is
+    # named for its first query rather than for its position: add a query at the FRONT and every
+    # positional name would shift by one, so `batch00001` would mean a different set of queries in
+    # two runs of the same pipeline -- with nothing to notice it, because the names still line up.
+    counts = collections.Counter({"Qc": 1, "Qa": 2, "Qb": 1})
+    before = batch_plan(order, counts, max_lines=2)
+    after = batch_plan(["Qd", *order], collections.Counter({"Qd": 1, **counts}), max_lines=2)
+    check("batches are named for their first query", [i for i, _ in before], ["Qc", "Qa", "Qb"])
+    # Positionally these would be batch00000/1/2 before and 00000/1/2 after, with DIFFERENT
+    # contents: the insertion pushes Qc into the first batch. By first query, the two batches that
+    # did not change still answer to the same name and still hold the same queries.
+    survivors = sorted(set(dict(before)) & set(dict(after)))
+    check("  an insertion at the front leaves the later batches named as they were", survivors, ["Qa", "Qb"])
+    check(
+        "  and each surviving name still means the same queries",
+        [dict(after)[n] for n in survivors],
+        [dict(before)[n] for n in survivors],
+    )
+    check(
+        "  while the batch the insertion landed in is a new name", sorted(set(dict(after)) - set(dict(before))), ["Qd"]
+    )
+
+    # ------------------------------------------------------------- streaming == buffered, batched
+    # ▶ THE SECOND GATE. `stream_batches` is what production runs; `batch_pairs` is the oracle it
+    # is checked against. Without this, the streaming batched writer has no test at all -- and it
+    # is the one that must not fall back to `assign`, whose memory was the reason for #65.
+    batched_commands = [{"args": [f"--segments={n}"]} for n in ("a", "b", "c")]
+    for label, limit in (("one batch", 100), ("several batches", 2)):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            streamed = stream_batches(batched_commands, lambda n: splits[n], root / "s", order, limit)
+            write_elements(batch_pairs(keyed, order, limit), root / "b")
+            check(
+                f"{label}: streamed batches match the buffered oracle",
+                payload_digests(root / "s"),
+                payload_digests(root / "b"),
+            )
+            check(f"  {label}: and the manifest counts the lines it wrote", sum(n for _, n, _ in streamed), 4)
+
+    # The batch writer honours its compresslevel, pinned on the BYTES like the pair-file checks
+    # above: nothing else asserted what level a batch is written at.
+    #
+    # ⚠ THIS DOES NOT COVER main()'s CALL SITE, and saying so is the point. `stream_batches` made
+    # `compresslevel` keyword-only to satisfy a lint, main() still passed it positionally, and CI
+    # failed on `mypy --strict` while this suite stayed green. Adding this check does not change
+    # that: it calls `stream_batches` directly, so it would pass with main() still broken --
+    # mutation-tested, and it does. Nothing here exercises main(), so mypy is the only thing
+    # standing between a signature change and its callers. Do not read a green self-test as
+    # covering the CLI.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        stream_batches(batched_commands, lambda n: splits[n], root, order, 100, compresslevel=COMPRESSLEVEL)
+        xfl = sorted({path.read_bytes()[8] for path in root.glob("*.segments.gz")})
+        check("batch files carry the fastest-deflate XFL byte too", xfl, [4])
+
+    # ⛔ AND THAT GATE MUST BE ABLE TO FAIL. A strand-outermost pass is the plausible wrong way to
+    # write a multi-query batch: it is what `stream_pairs` does one level up, and here it yields
+    # Qc+ Qa+ Qb+ Qa-, in which Qa recurs after Qb. That breaks rule 1, which lastz enforces with
+    # rc=1. Plant exactly that file and assert the digests diverge.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        stream_batches(batched_commands, lambda n: splits[n], root / "good", order, 100)
+        strand_outermost = [splits["c"][0], splits["a"][0], splits["b"][0], splits["a"][1]]
+        write_elements([("Qc", strand_outermost)], root / "bad")
+        check(
+            "a strand-outermost batch IS caught",
+            payload_digests(root / "good") != payload_digests(root / "bad"),
+            True,
+        )
+
+    # ▶ THE 2BIT ORDER READER, against bytes laid out by hand from the format description.
+    def fake_2bit(names: list[str], endian: str = "<", version: int = 0) -> bytes:
+        blob = struct.pack(endian + "4I", 0x1A412743, version, len(names), 0)
+        for n in names:
+            blob += bytes([len(n)]) + n.encode() + struct.pack(endian + "I", 0)
+        return blob
+
+    with tempfile.TemporaryDirectory() as tmp:
+        p = pathlib.Path(tmp) / "q.2bit"
+        p.write_bytes(fake_2bit(["chr3", "chr1", "chr10"]))
+        check("2bit order is file order, not sorted", read_2bit_order(p), ["chr3", "chr1", "chr10"])
+        p.write_bytes(fake_2bit(["chr3", "chr1"], endian=">"))
+        check("  and a big-endian 2bit reads the same", read_2bit_order(p), ["chr3", "chr1"])
+        p.write_bytes(fake_2bit(["chr1"], version=1))
+        try:
+            read_2bit_order(p)
+            check("  version 1 must refuse", "no raise", "ValueError")
+        except ValueError:
+            check("  version 1 must refuse", "ValueError", "ValueError")
+        p.write_bytes(b"not a 2bit file at all")
+        try:
+            read_2bit_order(p)
+            check("  a non-2bit must refuse", "no raise", "ValueError")
+        except ValueError:
+            check("  a non-2bit must refuse", "ValueError", "ValueError")
 
     # ⚠ the separator must not occur in the payload it separates
     check("separator is two underscores", PAIR_SEP, "__")
@@ -771,7 +1292,26 @@ def main() -> int:
     parser.add_argument("--segments-dir", default=".", help="directory holding the .segments files")
     parser.add_argument("--out", default="pairs", help="directory to write pair files into")
     parser.add_argument("--compresslevel", type=int, default=COMPRESSLEVEL)
+    parser.add_argument(
+        "--batch-lines",
+        type=int,
+        default=0,
+        help="pack whole query sequences into batches of about this many segment lines "
+        "(0 = off, one file per chromosome pair). Needs --query-2bit. A single query is never "
+        "split, so one larger than this becomes a batch of its own.",
+    )
+    parser.add_argument(
+        "--query-2bit",
+        help="the query .2bit, read for its sequence ORDER only. Required by --batch-lines, "
+        "because a batch holding several queries must list them in query-file order.",
+    )
     parser.add_argument("--verify", action="store_true", help="compare a pair file against its splits with real lastz")
+    parser.add_argument(
+        "--verify-batches",
+        action="store_true",
+        help="compare query BATCHES against the per-pair files with real lastz. Needs --bundle; "
+        "skips when no lastz is on PATH.",
+    )
     parser.add_argument("--bundle", help="extracted bundle, for --verify")
     parser.add_argument("--pair", help="TARGET,QUERY to verify, e.g. EH23a.chr9,EH23b.chrX")
     parser.add_argument(
@@ -796,6 +1336,10 @@ def main() -> int:
 
     if args.self_test:
         return self_test()
+    if args.verify_batches:
+        if not args.bundle:
+            parser.error("--verify-batches needs --bundle")
+        return verify_batches(args)
     if args.verify:
         if not (args.bundle and args.pair):
             parser.error("--verify needs --bundle and --pair")
@@ -842,10 +1386,20 @@ def main() -> int:
         # over part of the input is not the claim `--compare` is asked for.
         return 0 if ok and not (shortfall and not args.max_splits) else 1
 
-    manifest = stream_pairs(commands, read_segments, pathlib.Path(args.out), args.compresslevel, args.max_open)
+    if args.batch_lines:
+        if not args.query_2bit:
+            parser.error("--batch-lines needs --query-2bit: the batch order is the query file's order")
+        order = read_2bit_order(pathlib.Path(args.query_2bit))
+        manifest = stream_batches(
+            commands, read_segments, pathlib.Path(args.out), order, args.batch_lines, compresslevel=args.compresslevel
+        )
+        shape = "batches"
+    else:
+        manifest = stream_pairs(commands, read_segments, pathlib.Path(args.out), args.compresslevel, args.max_open)
+        shape = "pair_files"
     total_lines = sum(n for _, n, _ in manifest)
     total_bytes = sum(b for _, _, b in manifest)
-    print(f"{len(manifest)} pair_files, {total_lines:,} segments, {total_bytes / 1e9:.2f} GB gzipped")
+    print(f"{len(manifest)} {shape}, {total_lines:,} segments, {total_bytes / 1e9:.2f} GB gzipped")
     return 0
 
 
