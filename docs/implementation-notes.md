@@ -654,7 +654,15 @@ run_kegalign  ->  kegalign (the CUDA binary)     writes tmp*.segments, prints la
               ->  diagonal_partition.py          splits large .segments files
               ->  lastz --segments=...           gapped extension, one process per command
               ->  package_output.py              tars the whole thing for Galaxy
+              or  build_pairs.py                 groups the splits into one gzipped
+                                                 segments file per chromosome pair
 ```
+
+`build_pairs.py` is the alternative to `package_output.py`, selected by the Galaxy tool's
+*Output shape: collection*. Instead of one archive it emits one file per `(target, query)`
+chromosome pair, both strands, which Galaxy maps LASTZ over as a collection. It reads no command
+manifest -- target, query and strand are columns 1, 4 and 7 of the segment lines -- so it does not
+duplicate the `bashlex` parsing `package_output.py` does, and does not depend on it having run.
 
 `runner.py` is the conductor. Three `multiprocessing.Manager()` queues carry work between the stages, and each stage ends when it reads as many `SENTINEL_VALUE`s as there are workers — so the sentinel count and the worker count must agree, and both come from `--num_cpu`.
 
