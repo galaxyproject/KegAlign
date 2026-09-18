@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import collections
 import gzip
+import hashlib
 import json
 import pathlib
 import re
@@ -172,6 +173,12 @@ def pair_lines(strands: dict[str, list[str]]) -> list[str]:
 def write_pairs(
     pair_files: dict[PairKey, dict[str, list[str]]], out_dir: pathlib.Path, compresslevel: int = 6
 ) -> list[tuple[str, int, int]]:
+    """⚠ THE BUFFERED REFERENCE IMPLEMENTATION. `stream_pairs` is what runs; see its docstring.
+
+    Kept because it is the ORACLE: `--compare` runs both over the same input and asserts the pair
+    files agree, so this function is what makes the streaming one checkable. Do not call it on a
+    real bundle -- with `assign` it needs roughly twice the bundle's segment bytes in RAM.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest: list[tuple[str, int, int]] = []
     for key in sorted(pair_files, key=lambda k: k.identifier):
@@ -182,6 +189,172 @@ def write_pairs(
             fh.write(payload)
         manifest.append((key.identifier, len(lines), path.stat().st_size))
     return manifest
+
+
+# ---------------------------------------------------------------------------------- streaming
+
+#: Plus before minus: the pass order IS the ordering rule (see `stream_pairs`).
+STRAND_ORDER = ("+", "-")
+
+#: How many gzip writers may be open at once. Each costs ~270 KB of zlib deflate state, so the
+#: default is ~70 MB at worst -- and a chromosome-level pair has only ~100 pair files, so nothing
+#: is ever evicted in the case this is built for. The cap exists so a scaffold-level assembly hits
+#: an LRU rather than EMFILE.
+MAX_OPEN_WRITERS = 256
+
+
+def _line_strand(command_args: list[str]) -> typing.Callable[[str], str]:
+    """Which strand a line belongs to, resolved the way `assign` resolves it.
+
+    ⚠ NOT ALWAYS COLUMN 7. When a command declares `--strand`, `assign` files every one of its
+    lines under that strand and never looks at the column; only for `both` does the column decide.
+    The directory-scan path synthesises commands with no `--strand` at all, so it is ALWAYS
+    `both` there -- which is why this cannot be hoisted into a sort over commands, and why
+    `stream_pairs` makes two passes instead.
+    """
+    strand = strand_of(command_args)
+    if strand == "both":
+        return lambda line: line.split("\t")[6]
+    return lambda _line: strand
+
+
+def stream_pairs(
+    commands: list[dict[str, typing.Any]],
+    read_segments: typing.Callable[[str], list[str]],
+    out_dir: pathlib.Path,
+    compresslevel: int = 6,
+    max_open: int = MAX_OPEN_WRITERS,
+) -> list[tuple[str, int, int]]:
+    """Group splits into pair files WITHOUT holding the bundle in memory.
+
+    ⛔ WHY THIS REPLACED `assign` + `write_pairs`. Those hold every segment line of the whole
+    bundle in one dict of `str`, then join each pair's lines into one more full copy before
+    gzipping. Measured on real *Cannabis* splits: peak RSS = 52.4 MB + 1.96 x (input MB), a tight
+    linear fit over 124-2160 MB, which extrapolates to ~28 GB for a 14.15 GB bundle. It was
+    OOM-killed on a 15 GB machine. The cost is O(WHOLE BUNDLE) for an output that is per-pair --
+    and the tarball path it competes with is O(1), because `package_output.py` just streams files
+    into a tar.
+
+    ▶ THE ORDERING RULE IS THE PASS ORDER. A pair file must hold its plus lines before its minus
+    lines. Rather than buffer one strand to achieve that, this makes one pass per strand and
+    appends straight into one gzip writer per pair, held open across both. Memory becomes
+    O(number of pair files) -- tens of MB -- at the cost of reading the input twice, which is
+    seconds against the hours of lastz that follow.
+
+    ⚠ A command with a definite `--strand` is skipped entirely on the other strand's pass, so the
+    command-manifest path reads each split once, not twice. Only `both` commands are read twice.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    writers: collections.OrderedDict[PairKey, gzip.GzipFile] = collections.OrderedDict()
+    counts: collections.Counter[PairKey] = collections.Counter()
+    started: set[PairKey] = set()
+
+    def path_of(key: PairKey) -> pathlib.Path:
+        return out_dir / f"{key.identifier}.segments.gz"
+
+    def writer_for(key: PairKey) -> gzip.GzipFile:
+        found = writers.get(key)
+        if found is not None:
+            writers.move_to_end(key)
+            return found
+        while len(writers) >= max_open:
+            _, evicted = writers.popitem(last=False)
+            evicted.close()
+        # ▶ `mtime=0` makes the bytes a function of the content alone, so two runs of this script
+        # produce identical files. The buffered implementation stamped the current time, which
+        # meant its output could never be compared byte-for-byte across runs.
+        # ⚠ Reopening after an eviction appends a second gzip MEMBER. That is valid gzip and every
+        # reader concatenates members transparently, but it means the raw bytes of an evicted
+        # pair file differ from a single-member write -- which is why `--compare` asserts on the
+        # DECOMPRESSED payload rather than on the file's bytes.
+        mode = "ab" if key in started else "wb"
+        started.add(key)
+        opened = gzip.GzipFile(filename=path_of(key), mode=mode, compresslevel=compresslevel, mtime=0)
+        writers[key] = opened
+        return opened
+
+    try:
+        for wanted in STRAND_ORDER:
+            for command in commands:
+                args = command.get("args", [])
+                segments = arg_value(args, "--segments=")
+                if segments is None:
+                    continue
+                declared = strand_of(args)
+                if declared not in ("both", wanted):
+                    continue  # nothing of this command belongs to this pass
+                lines = read_segments(segments)
+                if not lines:
+                    continue
+                query = query_of(lines)
+                strand_of_line = _line_strand(args)
+                for target, run in split_by_target(lines):
+                    key = PairKey(target, query)
+                    for line in run:
+                        if strand_of_line(line) != wanted:
+                            continue
+                        handle = writer_for(key)
+                        handle.write(line.encode())
+                        handle.write(b"\n")
+                        counts[key] += 1
+    finally:
+        for handle in writers.values():
+            handle.close()
+
+    return [
+        (key.identifier, counts[key], path_of(key).stat().st_size)
+        for key in sorted(started, key=lambda k: k.identifier)
+    ]
+
+
+def payload_digests(out_dir: pathlib.Path) -> dict[str, tuple[str, int]]:
+    """`identifier -> (md5 of the DECOMPRESSED payload, line count)` for every pair file.
+
+    ⚠ The digest is of the payload, not of the file. A gzip header carries an mtime and a member
+    boundary is invisible after decompression, so two byte-different files can be the same pair
+    file -- and byte equality would fail for reasons that have nothing to do with correctness.
+    """
+    digests: dict[str, tuple[str, int]] = {}
+    for path in sorted(out_dir.glob("*.segments.gz")):
+        digest = hashlib.md5()
+        lines = 0
+        with gzip.open(path, "rb") as handle:
+            for line in handle:
+                digest.update(line)
+                lines += 1
+        digests[path.name[: -len(".segments.gz")]] = (digest.hexdigest(), lines)
+    return digests
+
+
+def compare_implementations(
+    commands: list[dict[str, typing.Any]],
+    read_segments: typing.Callable[[str], list[str]],
+    tmp: pathlib.Path,
+    compresslevel: int = 6,
+    max_open: int = MAX_OPEN_WRITERS,
+) -> tuple[bool, list[str]]:
+    """THE GATE. Run both implementations over one input and report every disagreement.
+
+    Returns `(ok, complaints)`. This is what licenses replacing the buffered implementation: not
+    an argument that the streaming one is equivalent, but a run of both on the same bytes.
+    """
+    buffered_dir, streamed_dir = tmp / "buffered", tmp / "streamed"
+    write_pairs(assign(commands, read_segments), buffered_dir, compresslevel)
+    stream_pairs(commands, read_segments, streamed_dir, compresslevel, max_open)
+
+    buffered, streamed = payload_digests(buffered_dir), payload_digests(streamed_dir)
+    complaints: list[str] = []
+    for missing in sorted(set(buffered) - set(streamed)):
+        complaints.append(f"{missing}: written by the buffered path, absent from the streamed one")
+    for extra in sorted(set(streamed) - set(buffered)):
+        complaints.append(f"{extra}: written by the streamed path, absent from the buffered one")
+    for name in sorted(set(buffered) & set(streamed)):
+        if buffered[name] != streamed[name]:
+            complaints.append(
+                f"{name}: buffered md5={buffered[name][0]} lines={buffered[name][1]}, "
+                f"streamed md5={streamed[name][0]} lines={streamed[name][1]}"
+            )
+    return not complaints, complaints
 
 
 # --------------------------------------------------------------------------------------- verify
@@ -273,15 +446,16 @@ def verify(args: argparse.Namespace) -> int:
         selected = selected[: args.max_splits]
     print(f"pair {want_target} x {want_query}: {len(selected)} split(s)", file=sys.stderr)
 
-    pair_files = assign(selected, read_segments)
-    if len(pair_files) != 1:
+    # ⛔ THROUGH `stream_pairs`, NOT the buffered pair. This arm is what compares a pair file
+    # against its splits with real lastz, so it has to build that pair file the way production
+    # does -- verifying an implementation that no longer runs would be worse than not verifying.
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="pair_verify_", dir=args.tmpdir))
+    manifest = stream_pairs(selected, read_segments, tmp / "pairs")
+    if len(manifest) != 1:
         print(
-            f"  note: {len(pair_files)} pair files in this selection: {[k.identifier for k in pair_files]}",
+            f"  note: {len(manifest)} pair files in this selection: {[i for i, _, _ in manifest]}",
             file=sys.stderr,
         )
-
-    tmp = pathlib.Path(tempfile.mkdtemp(prefix="pair_verify_", dir=args.tmpdir))
-    manifest = write_pairs(pair_files, tmp / "pairs")
     for identifier, n_lines, n_bytes in manifest:
         print(f"  pair file {identifier}: {n_lines:,} segments, {n_bytes:,} bytes gzipped", file=sys.stderr)
 
@@ -444,6 +618,49 @@ def self_test() -> int:
         ["chr_1", "chr_2"],
     )
 
+    # ------------------------------------------------------------------ streaming == buffered
+    # ▶ THE GATE, run on synthetic input so CI exercises it without a bundle. Each case is one
+    # the streaming rewrite could plausibly break: the ordering rule, a multi-target fan-out, a
+    # command whose declared strand disagrees with column 7, and the LRU eviction path.
+    splits = {
+        "p1.segments": [seg("T1", "Q1", "+", 1), seg("T2", "Q1", "+", 2)],
+        "m1.segments": [seg("T1", "Q1", "-", 3)],
+        "p2.segments": [seg("T1", "Q1", "+", 4)],
+        "b1.segments": [seg("T3", "Q2", "-", 5), seg("T3", "Q2", "+", 6)],
+    }
+    mixed_commands = [
+        {"args": ["--segments=m1.segments", "--strand=minus"]},
+        {"args": ["--segments=p1.segments", "--strand=plus"]},
+        {"args": ["--segments=b1.segments"]},
+        {"args": ["--segments=p2.segments", "--strand=plus"]},
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        ok, complaints = compare_implementations(mixed_commands, lambda n: splits[n], pathlib.Path(tmp))
+        check("streaming matches buffered on mixed strands and fan-out", (ok, complaints), (True, []))
+
+        # ⛔ EVICTION. With one writer allowed, every pair file is reopened and appended to, so
+        # each becomes multi-member gzip. The PAYLOAD must be unchanged -- this is the assertion
+        # that makes `--max-open` safe rather than merely present.
+        ok_lru, complaints_lru = compare_implementations(
+            mixed_commands, lambda n: splits[n], pathlib.Path(tmp), max_open=1
+        )
+        check("eviction to multi-member gzip preserves the payload", (ok_lru, complaints_lru), (True, []))
+
+    # ⛔ AND THE GATE MUST BE ABLE TO FAIL. A comparison that cannot detect a planted difference
+    # would pass forever and license anything. Break the ordering rule in a copy of the streaming
+    # output and assert the digests diverge.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        good, bad = root / "good", root / "bad"
+        stream_pairs(mixed_commands, lambda n: splits[n], good)
+        reversed_pairs = {k: {"+": v["-"], "-": v["+"]} for k, v in assign(mixed_commands, lambda n: splits[n]).items()}
+        write_pairs(reversed_pairs, bad)
+        check(
+            "a planted strand-order swap IS caught",
+            payload_digests(good) != payload_digests(bad),
+            True,
+        )
+
     if failures:
         print(f"\n{len(failures)} test(s) failed")
         return 1
@@ -462,7 +679,20 @@ def main() -> int:
     parser.add_argument("--verify", action="store_true", help="compare a pair file against its splits with real lastz")
     parser.add_argument("--bundle", help="extracted bundle, for --verify")
     parser.add_argument("--pair", help="TARGET,QUERY to verify, e.g. EH23a.chr9,EH23b.chrX")
-    parser.add_argument("--max-splits", type=int, default=0, help="first N splits in --verify (0 = all)")
+    parser.add_argument(
+        "--compare",
+        action="store_true",
+        help="THE GATE: run the buffered and streaming implementations over the same splits and "
+        "assert the pair files agree. Bound it with --max-splits; the buffered one needs ~2x the "
+        "input in RAM.",
+    )
+    parser.add_argument(
+        "--max-open",
+        type=int,
+        default=MAX_OPEN_WRITERS,
+        help=f"concurrent gzip writers before an LRU eviction (default {MAX_OPEN_WRITERS})",
+    )
+    parser.add_argument("--max-splits", type=int, default=0, help="first N splits in --verify/--compare (0 = all)")
     parser.add_argument("--smallest", type=int, default=0, help="the N SMALLEST splits, for a quick --verify")
     parser.add_argument("--lastz", default="lastz")
     parser.add_argument("--tmpdir", default=None)
@@ -489,9 +719,26 @@ def main() -> int:
         commands = [{"args": [f"--segments={p.name}"]} for p in sorted(seg_dir.glob("*.segments"))]
         if not commands:
             sys.exit(f"ERROR: no *.segments files under {seg_dir}")
-    manifest = write_pairs(
-        assign(commands, lambda n: (seg_dir / n).read_text().splitlines()), pathlib.Path(args.out), args.compresslevel
-    )
+
+    def read_segments(name: str) -> list[str]:
+        return (seg_dir / name).read_text().splitlines()
+
+    if args.compare:
+        # ⚠ Deliberately bounded. The gate runs the BUFFERED implementation too, so it can only be
+        # run over an input small enough for that one to survive -- which is the whole reason the
+        # streaming one exists. Equivalence is established where both fit and then relied on.
+        chosen = commands[: args.max_splits] if args.max_splits else commands
+        print(f"comparing both implementations over {len(chosen)} split(s)")
+        with tempfile.TemporaryDirectory(dir=args.tmpdir) as tmp:
+            ok, complaints = compare_implementations(
+                chosen, read_segments, pathlib.Path(tmp), args.compresslevel, args.max_open
+            )
+        for complaint in complaints:
+            print(f"  ⛔ {complaint}")
+        print("pair files agree" if ok else f"{len(complaints)} disagreement(s)")
+        return 0 if ok else 1
+
+    manifest = stream_pairs(commands, read_segments, pathlib.Path(args.out), args.compresslevel, args.max_open)
     total_lines = sum(n for _, n, _ in manifest)
     total_bytes = sum(b for _, _, b in manifest)
     print(f"{len(manifest)} pair_files, {total_lines:,} segments, {total_bytes / 1e9:.2f} GB gzipped")
