@@ -33,17 +33,20 @@ datasets would roughly triple the object store. But lastz CANNOT read a gzipped 
 consumer must decompress its own pair file before invoking lastz. That is ~140 MB per job, against
 the current runner inflating all 14.58 GB into the job directory before anything runs.
 """
+
 from __future__ import annotations
 
 import argparse
 import collections
 import gzip
+import json
 import pathlib
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import typing
 
 #: Separates target and query in a pair file's element identifier. Two underscores, because a single
@@ -66,7 +69,7 @@ class PairKey(typing.NamedTuple):
 def arg_value(args: list[str], prefix: str) -> str | None:
     for arg in args:
         if arg.startswith(prefix):
-            return arg[len(prefix):]
+            return arg[len(prefix) :]
     return None
 
 
@@ -119,7 +122,9 @@ def query_of(lines: list[str]) -> str:
     return names.pop()
 
 
-def assign(commands: list[dict], read_segments: typing.Callable[[str], list[str]]) -> dict[PairKey, dict[str, list[str]]]:
+def assign(
+    commands: list[dict], read_segments: typing.Callable[[str], list[str]]
+) -> dict[PairKey, dict[str, list[str]]]:
     """Group every segment line of every command into pair_files, keyed (target, query).
 
     The returned mapping is pair file -> {"+": [...], "-": [...]}, each list in the order the
@@ -151,7 +156,9 @@ def pair_lines(strands: dict[str, list[str]]) -> list[str]:
     return strands["+"] + strands["-"]
 
 
-def write_pairs(pair_files: dict[PairKey, dict[str, list[str]]], out_dir: pathlib.Path, compresslevel: int = 6) -> list[tuple[str, int, int]]:
+def write_pairs(
+    pair_files: dict[PairKey, dict[str, list[str]]], out_dir: pathlib.Path, compresslevel: int = 6
+) -> list[tuple[str, int, int]]:
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest: list[tuple[str, int, int]] = []
     for key in sorted(pair_files, key=lambda k: k.identifier):
@@ -185,11 +192,26 @@ def maf_blocks(path: pathlib.Path) -> collections.Counter:
     return blocks
 
 
-def run_lastz(lastz: str, target: str, query: str, segments: pathlib.Path, out: pathlib.Path,
-              extra: list[str], workdir: pathlib.Path) -> float:
-    import time
-    argv = [lastz, target, query, "--allocate:traceback=1.99G", "--format=maf-",
-            f"--segments={segments}", f"--output={out}", *extra]
+def run_lastz(
+    lastz: str,
+    target: str,
+    query: str,
+    segments: pathlib.Path,
+    *,
+    out: pathlib.Path,
+    extra: list[str],
+    workdir: pathlib.Path,
+) -> float:
+    argv = [
+        lastz,
+        target,
+        query,
+        "--allocate:traceback=1.99G",
+        "--format=maf-",
+        f"--segments={segments}",
+        f"--output={out}",
+        *extra,
+    ]
     begin = time.perf_counter()
     proc = subprocess.run(argv, cwd=workdir, capture_output=True, text=True)
     elapsed = time.perf_counter() - begin
@@ -205,16 +227,16 @@ def verify(args: argparse.Namespace) -> int:
     lastz rather than argued from the manual. A pair file is only legitimate if merging splits changes
     nothing about what comes out.
     """
-    import json
-
     bundle = pathlib.Path(args.bundle).resolve()
     workdir = bundle / "galaxy" / "files"
-    commands = [json.loads(line) for line in (bundle / "galaxy" / "commands.json").read_text().splitlines() if line.strip()]
+    commands = [
+        json.loads(line) for line in (bundle / "galaxy" / "commands.json").read_text().splitlines() if line.strip()
+    ]
 
     def read_segments(name: str) -> list[str]:
         return (workdir / name).read_text().splitlines()
 
-    want_target, want_query = (args.pair.split(",") + [""])[:2]
+    want_target, want_query = [*args.pair.split(","), ""][:2]
     selected = []
     for command in commands:
         segments = arg_value(command["args"], "--segments=")
@@ -240,7 +262,10 @@ def verify(args: argparse.Namespace) -> int:
 
     pair_files = assign(selected, read_segments)
     if len(pair_files) != 1:
-        print(f"  note: {len(pair_files)} pair files in this selection: {[k.identifier for k in pair_files]}", file=sys.stderr)
+        print(
+            f"  note: {len(pair_files)} pair files in this selection: {[k.identifier for k in pair_files]}",
+            file=sys.stderr,
+        )
 
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="pair_verify_", dir=args.tmpdir))
     manifest = write_pairs(pair_files, tmp / "pairs")
@@ -249,8 +274,11 @@ def verify(args: argparse.Namespace) -> int:
 
     target_spec = arg_value(selected[0]["args"], "--target=")
     query_spec = arg_value(selected[0]["args"], "--query=")
-    shared = [a for a in selected[0]["args"]
-              if not a.startswith(("--target=", "--query=", "--segments=", "--output=", "--strand=", "--format="))]
+    shared = [
+        a
+        for a in selected[0]["args"]
+        if not a.startswith(("--target=", "--query=", "--segments=", "--output=", "--strand=", "--format="))
+    ]
 
     # --- arm A: one lastz per pair file, no --strand (default is both; measured identical) ---
     per_pair: collections.Counter = collections.Counter()
@@ -258,9 +286,9 @@ def verify(args: argparse.Namespace) -> int:
     for identifier, _, _ in manifest:
         plain = tmp / f"{identifier}.segments"
         with gzip.open(tmp / "pairs" / f"{identifier}.segments.gz", "rb") as src, plain.open("wb") as dst:
-            shutil.copyfileobj(src, dst)          # the consumer's gunzip step, in miniature
+            shutil.copyfileobj(src, dst)  # the consumer's gunzip step, in miniature
         out = tmp / f"{identifier}.pairfile.maf-"
-        pair_seconds += run_lastz(args.lastz, target_spec, query_spec, plain, out, shared, workdir)
+        pair_seconds += run_lastz(args.lastz, target_spec, query_spec, plain, out=out, extra=shared, workdir=workdir)
         per_pair += maf_blocks(out)
 
     # --- arm B: the original splits, each with its own --strand ---
@@ -270,12 +298,16 @@ def verify(args: argparse.Namespace) -> int:
         segments = workdir / arg_value(command["args"], "--segments=")
         strand = [a for a in command["args"] if a.startswith("--strand=")]
         out = tmp / (pathlib.Path(arg_value(command["args"], "--output=")).name + ".split")
-        split_seconds += run_lastz(args.lastz, target_spec, query_spec, segments, out, shared + strand, workdir)
+        split_seconds += run_lastz(
+            args.lastz, target_spec, query_spec, segments, out=out, extra=[*shared, *strand], workdir=workdir
+        )
         per_split += maf_blocks(out)
 
     print(f"\n{'':<22}{'blocks':>10}{'seconds':>10}", file=sys.stderr)
     print(f"{'pair file (1 lastz)':<22}{sum(per_pair.values()):>10,}{pair_seconds:>10.1f}", file=sys.stderr)
-    print(f"{'splits (%d lastz)' % len(selected):<22}{sum(per_split.values()):>10,}{split_seconds:>10.1f}", file=sys.stderr)
+    print(
+        f"{f'splits ({len(selected)} lastz)':<22}{sum(per_split.values()):>10,}{split_seconds:>10.1f}", file=sys.stderr
+    )
 
     # ⛔ COMPARE BY LOCUS, NOT BY BLOCK TEXT. lastz's own manual warns that the same alignment
     # may come back with "minor variations such as shifting of equally-scoring gap placements".
@@ -283,7 +315,9 @@ def verify(args: argparse.Namespace) -> int:
     # coordinates, same length -- as different STRINGS. Comparing full block text calls that a
     # difference, which on a 238,076-segment pair file reported three alignments as "missing from the
     # pair file" when every one of them was present. The locus is the thing that has to match.
-    locus = lambda b: (b[0], b[1].split()[2], b[2].split()[2])
+    def locus(b: tuple[str, ...]) -> tuple[str, str, str]:
+        return (b[0], b[1].split()[2], b[2].split()[2])
+
     pair_loci = collections.Counter(locus(b) for b in per_pair.elements())
     split_loci = collections.Counter(locus(b) for b in per_split.elements())
 
@@ -300,17 +334,20 @@ def verify(args: argparse.Namespace) -> int:
     print(f"{'pair file':<22}{sum(pair_loci.values()):>10,}{len(pair_loci):>10,}", file=sys.stderr)
     print(f"{'splits':<22}{sum(split_loci.values()):>10,}{len(split_loci):>10,}", file=sys.stderr)
     if dup_splits or dup_pair:
-        print(f"\nloci reported more than once: splits {len(dup_splits)} "
-              f"(+{sum(v - 1 for v in dup_splits.values())} blocks), pair file {len(dup_pair)}",
-              file=sys.stderr)
+        print(
+            f"\nloci reported more than once: splits {len(dup_splits)} "
+            f"(+{sum(v - 1 for v in dup_splits.values())} blocks), pair file {len(dup_pair)}",
+            file=sys.stderr,
+        )
 
     if not lost and not gained:
         extra = sum(v - 1 for v in dup_splits.values())
-        print(f"\nok - identical alignment loci; the pair file de-duplicates {extra} block(s) the "
-              f"splits report twice", file=sys.stderr)
+        print(
+            f"\nok - identical alignment loci; the pair file de-duplicates {extra} block(s) the splits report twice",
+            file=sys.stderr,
+        )
         return 0
-    print(f"\nnot ok - {len(lost)} locus/loci only in the splits, {len(gained)} only in the pair file",
-          file=sys.stderr)
+    print(f"\nnot ok - {len(lost)} locus/loci only in the splits, {len(gained)} only in the pair file", file=sys.stderr)
     for loc in list(lost)[:3]:
         print("  split-only locus:", loc, file=sys.stderr)
     for loc in list(gained)[:3]:
@@ -329,18 +366,18 @@ def self_test() -> int:
             print(f"ok - {label}")
 
     def seg(t: str, q: str, s: str, start: int) -> str:
-        return f"{t}\t{start}\t{start+9}\t{q}\t{start}\t{start+9}\t{s}\t3000"
+        return f"{t}\t{start}\t{start + 9}\t{q}\t{start}\t{start + 9}\t{s}\t3000"
 
     # a split holding one target, and one holding three contiguous runs
     single = [seg("T1", "Q1", "+", i) for i in range(3)]
-    multi = ([seg("T1", "Q1", "+", 0)] + [seg("T2", "Q1", "+", 1)] * 2 + [seg("T3", "Q1", "+", 2)])
+    multi = [seg("T1", "Q1", "+", 0)] + [seg("T2", "Q1", "+", 1)] * 2 + [seg("T3", "Q1", "+", 2)]
     check("single-target split is one run", [t for t, _ in split_by_target(single)], ["T1"])
     check("multi-target split cuts into contiguous runs", [t for t, _ in split_by_target(multi)], ["T1", "T2", "T3"])
     check("cutting loses no lines", sum(len(r) for _, r in split_by_target(multi)), len(multi))
 
     check("query_of finds the single query", query_of(single), "Q1")
     try:
-        query_of(single + [seg("T1", "Q2", "+", 9)])
+        query_of([*single, seg("T1", "Q2", "+", 9)])
         check("two queries must raise", "no raise", "ValueError")
     except ValueError:
         check("two queries must raise", "ValueError", "ValueError")
@@ -352,37 +389,47 @@ def self_test() -> int:
     # assert the written order is still plus-then-minus -- this is the invariant the lastz
     # manual imposes, and the one a naive concatenation in command order would break.
     store = {"m.segments": [seg("T1", "Q1", "-", 5)], "p.segments": [seg("T1", "Q1", "+", 1)]}
-    cmds = [{"args": ["--segments=m.segments", "--strand=minus"]},
-            {"args": ["--segments=p.segments", "--strand=plus"]}]
+    cmds = [{"args": ["--segments=m.segments", "--strand=minus"]}, {"args": ["--segments=p.segments", "--strand=plus"]}]
     pair_files = assign(cmds, lambda n: store[n])
     check("one pair file from one chromosome pair", [k.identifier for k in pair_files], ["T1__Q1"])
     written = pair_lines(pair_files[PairKey("T1", "Q1")])
-    check("plus is written before minus, whatever the command order",
-          [ln.split("\t")[6] for ln in written], ["+", "-"])
+    check("plus is written before minus, whatever the command order", [ln.split("\t")[6] for ln in written], ["+", "-"])
 
     # a multi-target split lands in as many pair files as it has targets, losing nothing
     pair_files2 = assign([{"args": ["--segments=x", "--strand=plus"]}], lambda n: multi)
-    check("multi-target split fans into 3 pair files", sorted(k.identifier for k in pair_files2),
-          ["T1__Q1", "T2__Q1", "T3__Q1"])
-    check("  and every line survives the fan-out",
-          sum(len(pair_lines(v)) for v in pair_files2.values()), len(multi))
+    check(
+        "multi-target split fans into 3 pair files",
+        sorted(k.identifier for k in pair_files2),
+        ["T1__Q1", "T2__Q1", "T3__Q1"],
+    )
+    check("  and every line survives the fan-out", sum(len(pair_lines(v)) for v in pair_files2.values()), len(multi))
 
     # ▶ THE DIRECTORY-SCAN PATH: no --strand in the synthesised command, so the strand has to
     # come from column 7 of each line. A pair file built this way must match one built from commands.
     mixed = [seg("T1", "Q1", "-", 5), seg("T1", "Q1", "+", 1)]
     from_file = assign([{"args": ["--segments=x"]}], lambda n: mixed)
-    check("strand read from column 7 when --strand is absent",
-          [ln.split("\t")[6] for ln in pair_lines(from_file[PairKey("T1", "Q1")])], ["+", "-"])
-    from_cmds = assign([{"args": ["--segments=m", "--strand=minus"]},
-                        {"args": ["--segments=p", "--strand=plus"]}],
-                       lambda n: [mixed[0]] if n == "m" else [mixed[1]])
-    check("  and agrees with the command-driven path",
-          pair_lines(from_file[PairKey("T1", "Q1")]), pair_lines(from_cmds[PairKey("T1", "Q1")]))
+    check(
+        "strand read from column 7 when --strand is absent",
+        [ln.split("\t")[6] for ln in pair_lines(from_file[PairKey("T1", "Q1")])],
+        ["+", "-"],
+    )
+    from_cmds = assign(
+        [{"args": ["--segments=m", "--strand=minus"]}, {"args": ["--segments=p", "--strand=plus"]}],
+        lambda n: [mixed[0]] if n == "m" else [mixed[1]],
+    )
+    check(
+        "  and agrees with the command-driven path",
+        pair_lines(from_file[PairKey("T1", "Q1")]),
+        pair_lines(from_cmds[PairKey("T1", "Q1")]),
+    )
 
     # ⚠ the separator must not occur in the payload it separates
     check("separator is two underscores", PAIR_SEP, "__")
-    check("a single-underscore name still round-trips",
-          PairKey("chr_1", "chr_2").identifier.split(PAIR_SEP), ["chr_1", "chr_2"])
+    check(
+        "a single-underscore name still round-trips",
+        PairKey("chr_1", "chr_2").identifier.split(PAIR_SEP),
+        ["chr_1", "chr_2"],
+    )
 
     if failures:
         print(f"\n{len(failures)} test(s) failed")
@@ -393,8 +440,9 @@ def self_test() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--commands", help="commands.json to group (optional; segments carry "
-                                          "target, query and strand themselves)")
+    parser.add_argument(
+        "--commands", help="commands.json to group (optional; segments carry target, query and strand themselves)"
+    )
     parser.add_argument("--segments-dir", default=".", help="directory holding the .segments files")
     parser.add_argument("--out", default="pairs", help="directory to write pair files into")
     parser.add_argument("--compresslevel", type=int, default=6)
@@ -417,7 +465,6 @@ def main() -> int:
 
     seg_dir = pathlib.Path(args.segments_dir)
     if args.commands:
-        import json
         text = pathlib.Path(args.commands).read_text().splitlines()
         commands = [json.loads(line) for line in text if line.strip()]
     else:
@@ -429,11 +476,12 @@ def main() -> int:
         commands = [{"args": [f"--segments={p.name}"]} for p in sorted(seg_dir.glob("*.segments"))]
         if not commands:
             sys.exit(f"ERROR: no *.segments files under {seg_dir}")
-    manifest = write_pairs(assign(commands, lambda n: (seg_dir / n).read_text().splitlines()),
-                          pathlib.Path(args.out), args.compresslevel)
+    manifest = write_pairs(
+        assign(commands, lambda n: (seg_dir / n).read_text().splitlines()), pathlib.Path(args.out), args.compresslevel
+    )
     total_lines = sum(n for _, n, _ in manifest)
     total_bytes = sum(b for _, _, b in manifest)
-    print(f"{len(manifest)} pair_files, {total_lines:,} segments, {total_bytes/1e9:.2f} GB gzipped")
+    print(f"{len(manifest)} pair_files, {total_lines:,} segments, {total_bytes / 1e9:.2f} GB gzipped")
     return 0
 
 
