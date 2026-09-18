@@ -73,6 +73,19 @@ def arg_value(args: list[str], prefix: str) -> str | None:
     return None
 
 
+def require_arg(command_args: list[str], prefix: str) -> str:
+    """`arg_value`, but for the arguments a command cannot legally be missing.
+
+    Returning `str | None` everywhere pushes an `is None` check onto every caller and mypy is
+    right to insist on it. Where the absence would be a malformed command rather than an option
+    left unset, say so here once.
+    """
+    value = arg_value(command_args, prefix)
+    if value is None:
+        raise SystemExit(f"ERROR: command has no {prefix}...: {command_args}")
+    return value
+
+
 def strand_of(command_args: list[str]) -> str:
     """The strand a command searches, as the '+'/'-' that appears in its segment lines.
 
@@ -123,7 +136,7 @@ def query_of(lines: list[str]) -> str:
 
 
 def assign(
-    commands: list[dict], read_segments: typing.Callable[[str], list[str]]
+    commands: list[dict[str, typing.Any]], read_segments: typing.Callable[[str], list[str]]
 ) -> dict[PairKey, dict[str, list[str]]]:
     """Group every segment line of every command into pair_files, keyed (target, query).
 
@@ -176,9 +189,9 @@ def write_pairs(
 MAF_BLOCK_START = re.compile(r"^a score=")
 
 
-def maf_blocks(path: pathlib.Path) -> collections.Counter:
+def maf_blocks(path: pathlib.Path) -> collections.Counter[tuple[str, ...]]:
     """MAF blocks as a multiset, so two runs can be compared regardless of block order."""
-    blocks: collections.Counter = collections.Counter()
+    blocks: collections.Counter[tuple[str, ...]] = collections.Counter()
     current: list[str] = []
     for line in path.read_text().splitlines():
         if MAF_BLOCK_START.match(line):
@@ -253,7 +266,7 @@ def verify(args: argparse.Namespace) -> int:
         # of segments and takes hours in one lastz; the merge property is the same code path at
         # any size, so a size-bounded selection answers it in minutes. The selection is still
         # returned in command order, so the pair file is built exactly as it would be in production.
-        by_size = sorted(selected, key=lambda c: (workdir / arg_value(c["args"], "--segments=")).stat().st_size)
+        by_size = sorted(selected, key=lambda c: (workdir / require_arg(c["args"], "--segments=")).stat().st_size)
         keep = {id(c) for c in by_size[: args.smallest]}
         selected = [c for c in selected if id(c) in keep]
     elif args.max_splits:
@@ -272,8 +285,8 @@ def verify(args: argparse.Namespace) -> int:
     for identifier, n_lines, n_bytes in manifest:
         print(f"  pair file {identifier}: {n_lines:,} segments, {n_bytes:,} bytes gzipped", file=sys.stderr)
 
-    target_spec = arg_value(selected[0]["args"], "--target=")
-    query_spec = arg_value(selected[0]["args"], "--query=")
+    target_spec = require_arg(selected[0]["args"], "--target=")
+    query_spec = require_arg(selected[0]["args"], "--query=")
     shared = [
         a
         for a in selected[0]["args"]
@@ -281,7 +294,7 @@ def verify(args: argparse.Namespace) -> int:
     ]
 
     # --- arm A: one lastz per pair file, no --strand (default is both; measured identical) ---
-    per_pair: collections.Counter = collections.Counter()
+    per_pair: collections.Counter[tuple[str, ...]] = collections.Counter()
     pair_seconds = 0.0
     for identifier, _, _ in manifest:
         plain = tmp / f"{identifier}.segments"
@@ -292,14 +305,14 @@ def verify(args: argparse.Namespace) -> int:
         per_pair += maf_blocks(out)
 
     # --- arm B: the original splits, each with its own --strand ---
-    per_split: collections.Counter = collections.Counter()
+    per_split: collections.Counter[tuple[str, ...]] = collections.Counter()
     split_seconds = 0.0
     for command in selected:
-        segments = workdir / arg_value(command["args"], "--segments=")
+        segments_path = workdir / require_arg(command["args"], "--segments=")
         strand = [a for a in command["args"] if a.startswith("--strand=")]
-        out = tmp / (pathlib.Path(arg_value(command["args"], "--output=")).name + ".split")
+        out = tmp / (pathlib.Path(require_arg(command["args"], "--output=")).name + ".split")
         split_seconds += run_lastz(
-            args.lastz, target_spec, query_spec, segments, out=out, extra=[*shared, *strand], workdir=workdir
+            args.lastz, target_spec, query_spec, segments_path, out=out, extra=[*shared, *strand], workdir=workdir
         )
         per_split += maf_blocks(out)
 
