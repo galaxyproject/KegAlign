@@ -128,6 +128,22 @@ python ./scripts/runner.py --diagonal-partition --format maf- --num-cpu 16 --num
 python ./scripts/package_output.py --output_format maf- --tool_directory ./scripts
 ```
 
+3) Or you can emit a **collection**: one gzipped segments file per (target, query) chromosome pair, both strands, instead of one archive holding everything. This is what the Galaxy tool's *Output shape: collection* produces, and what Growler maps LASTZ over.
+
+```bash
+# generate per-chromosome-pair segment files
+python ./scripts/runner.py --diagonal-partition --format maf- --num-cpu 16 --num-gpu 1 --output-file data_package.tgz --output-type tarball --tool_directory ./scripts test-data/apple.fasta.gz test-data/orange.fasta.gz
+python ./scripts/build_pairs.py --segments-dir . --out pairs
+```
+
+`build_pairs.py` reads no command manifest: target, query and strand are columns 1, 4 and 7 of the segment lines themselves. Each output is named `<target>__<query>.segments.gz`.
+
+The ordering follows the LASTZ manual's *Segment File* rules — one query sequence per file, all positive-strand intervals before any negative-strand ones, target order unconstrained — so each file can be handed to LASTZ as-is, with no `--strand` and no `subset=`.
+
+⚠ **Decompress before use.** LASTZ cannot read a gzipped segments file, and says so only obliquely: `--segments=x.gz` reports `FAILURE: bad field (x.gz: line 1, ...)` and still writes an empty output file.
+
+**Terminology.** A **keg** is the tarball, as it has always been in this project. The files this option emits are **pair files** — one per chromosome pair — and are not kegs.
+
 2) You can run KegAlign followed by our diagonal partitioning python script to generate the list of LASTZ commands.
 
 ```bash
