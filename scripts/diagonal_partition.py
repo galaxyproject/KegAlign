@@ -285,8 +285,13 @@ if __name__ == "__main__":
 
     # Writing file in chunks
     ctr = 0
-    # [i for i in data_keys if i not in set(skip_pairs)]:
-    for pair in data.keys() - skip_pairs:
+    # ⛔ SORTED, BECAUSE A SET DIFFERENCE HAS NO ORDER. `data.keys() - skip_pairs` is a set of
+    # (target, query) string tuples, so iteration follows PYTHONHASHSEED -- measured over five
+    # seeds on one five-pair set, five different orders. `ctr` is assigned in that order, so `.splitN` named
+    # different content between two runs of the same bundle. Everything downstream that names a
+    # split by number, or concatenates splits in glob order, then differs run to run for no reason
+    # in the data. Sorting costs nothing here and makes the partition reproducible.
+    for pair in sorted(data.keys() - skip_pairs):
         for chunk in chunks(list(zip(*data[pair]))[2], chunk_size):
             ctr += 1
             name_addition = f".split{ctr}"

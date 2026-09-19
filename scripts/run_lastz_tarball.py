@@ -24,6 +24,24 @@ COMPRESSLEVEL: typing.Final = 1
 
 @contextlib.contextmanager
 def open_file(filename: str) -> typing.Iterator[typing.IO[str]]:
+    """The output handle. Python's own gzip, at level 1.
+
+    ⛔ THE pigz VERSION OF THIS FUNCTION IS NOT PORTABLE HERE, AND THE DIFFERENCE IS DELIBERATE.
+    galaxytools' copy of this script pipes gzipped output through `pigz -1 -n` (2,456 MB/s against
+    ~22-26 MB/s for Python at level 6) and treats a missing pigz as fatal. It can, because
+    `batched_lastz.xml` declares `pigz` as a requirement and resolves to a mulled container that
+    carries it.
+
+    THIS copy ships in `kegalign-full`, whose run dependencies are bash, bashlex, coreutils, gawk,
+    grep, GZIP, nvidia-ml-py, python, sed, tbb-devel and time -- no pigz. `recipe/build.sh`
+    installs this file into `$PREFIX/bin` and the recipe's test block asserts it is executable, so
+    it is part of that package's interface. Porting the pigz path would make it die on a missing
+    binary in its own container.
+
+    ▶ The level-1 rule IS honoured (`COMPRESSLEVEL`); it is only the parallelism that differs.
+    Two copies, two dependency sets, one intentional divergence -- see `command_succeeded` for the
+    one that was NOT intentional.
+    """
     if filename.endswith(".gz"):
         with gzip.open(filename, "wt", compresslevel=COMPRESSLEVEL) as f:
             yield f

@@ -414,6 +414,14 @@ def _line_strand(command_args: list[str]) -> typing.Callable[[str], str]:
     return lambda _line: strand
 
 
+def positive_int(text: str) -> int:
+    """An `int` of at least 1, so argparse rejects it rather than a loop failing on an empty dict."""
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
+
+
 def stream_pairs(
     commands: list[dict[str, typing.Any]],
     read_segments: typing.Callable[[str], list[str]],
@@ -422,6 +430,10 @@ def stream_pairs(
     max_open: int = MAX_OPEN_WRITERS,
 ) -> list[tuple[str, int, int]]:
     """Group splits into pair files WITHOUT holding the bundle in memory.
+
+    ⚠ `max_open` must be at least 1. The eviction loop is `while len(writers) >= max_open`, so at
+    0 it pops from an empty OrderedDict before the first writer is ever created, and the caller
+    gets a bare KeyError from a line that is about resource limits.
 
     ⛔ WHY THIS REPLACED `assign` + `write_pairs`. Those hold every segment line of the whole
     bundle in one dict of `str`, then join each pair's lines into one more full copy before
@@ -440,6 +452,8 @@ def stream_pairs(
     ⚠ A command with a definite `--strand` is skipped entirely on the other strand's pass, so the
     command-manifest path reads each split once, not twice. Only `both` commands are read twice.
     """
+    if max_open < 1:
+        raise ValueError(f"max_open must be at least 1, got {max_open}")
     out_dir.mkdir(parents=True, exist_ok=True)
     writers: collections.OrderedDict[PairKey, gzip.GzipFile] = collections.OrderedDict()
     counts: collections.Counter[PairKey] = collections.Counter()
@@ -708,10 +722,17 @@ def run_lastz(
         *extra,
     ]
     begin = time.perf_counter()
-    proc = subprocess.run(argv, cwd=workdir, capture_output=True, text=True)
+    proc = subprocess.run(argv, cwd=workdir, capture_output=True, text=True, check=False)
     elapsed = time.perf_counter() - begin
-    if proc.returncode != 0 and proc.stderr.strip():
-        sys.exit(f"lastz failed ({proc.returncode}): {proc.stderr[:600]}")
+    # ⛔ A NON-ZERO EXIT IS FATAL WHETHER OR NOT IT SAID ANYTHING. This used to require stderr to
+    # be non-empty as well, and that is the one combination that must not be tolerated: lastz's
+    # suicidef() output can land on stdout, and `--format=maf-` leaves a VALID EMPTY FILE behind
+    # on failure. Both arms then produce zero MAF blocks, compare_loci() finds nothing lost and
+    # nothing gained, and --verify prints `ok - identical alignment loci` and returns 0. The check
+    # that exists to prove the merge property would have certified two failed runs.
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or "no output on stderr or stdout"
+        sys.exit(f"lastz failed ({proc.returncode}): {detail[:600]}")
     return elapsed
 
 
@@ -737,7 +758,14 @@ def verify(args: argparse.Namespace) -> int:
         segments = arg_value(command["args"], "--segments=")
         if segments is None:
             continue
-        head = (workdir / segments).open().readline().split("\t")
+        with (workdir / segments).open() as handle:
+            head = handle.readline().split("\t")
+        # ⚠ AN EMPTY SPLIT IS AN EXPECTED INPUT, not a corrupt bundle: `assign` and `stream_pairs`
+        # both carry an explicit `if not lines: continue` for exactly this. Reading head[3] off one
+        # raises IndexError, so --verify died with a traceback on a bundle the production path
+        # handles without comment. It cannot name a pair, so it cannot be the pair being selected.
+        if len(head) < 4:
+            continue
         if head[0] == want_target and head[3] == want_query:
             selected.append(command)
     if not selected:
@@ -1133,6 +1161,57 @@ def self_test() -> int:
             )
             check(f"  {label}: and the manifest counts the lines it wrote", sum(n for _, n, _ in streamed), 4)
 
+    # `max_open` below 1 used to reach `writers.popitem(last=False)` with nothing open and raise a
+    # bare KeyError from a line that is about resource limits. argparse rejects it at the CLI; this
+    # covers the programmatic call, which argparse does not.
+    try:
+        stream_pairs([], lambda n: [], pathlib.Path(tempfile.gettempdir()) / "unused", max_open=0)
+    except ValueError as exc:
+        check("max_open below 1 raises ValueError, not KeyError", "at least 1" in str(exc), True)
+    except KeyError:
+        check("max_open below 1 raises ValueError, not KeyError", "KeyError", "ValueError")
+    else:
+        check("max_open below 1 raises ValueError, not KeyError", "no exception", "ValueError")
+
+    # ⛔ AND THE GATE ABOVE DOES NOT COVER THE ONE AXIS THE TWO WRITERS DISAGREE ON. Every query in
+    # `splits` has exactly one target, so "grouped by target" and "in command order" are the same
+    # sequence and the byte comparison passes without ever testing the ordering. Give one query
+    # splits that interleave two targets and they diverge -- measured:
+    #
+    #     streamed  T2 T1 T1      oracle  T1 T1 T2
+    #
+    # `batch_pairs` walks `sorted(pair_files)`, which is keyed by (target, query), so a query's
+    # lines come out grouped by target. `stream_batches` cannot do that without buffering the whole
+    # query, which is the reason it exists, so it emits in command order.
+    #
+    # ▶ BOTH FILES ARE LEGAL. The measured table at the top of this module covers query order
+    # (load-bearing, fails loudly) and strand order (not enforced); target order WITHIN a query is
+    # not constrained by the manual and was not perturbed in that fixture. So this asserts the
+    # rules that ARE specified rather than byte equality, and says plainly that it cannot assert
+    # byte equality here. Making the two agree would mean deciding that the oracle's target
+    # grouping is part of the contract, and nothing says it is.
+    interleaved = {
+        "x": [seg("T2", "Qa", "+", 1), seg("T1", "Qa", "+", 2)],
+        "y": [seg("T1", "Qa", "-", 3)],
+    }
+    inter_commands = [{"args": [f"--segments={n}"]} for n in ("x", "y")]
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        stream_batches(inter_commands, lambda n: interleaved[n], root / "s", ["Qa"], 100)
+        written = [
+            line
+            for path in sorted((root / "s").glob("*.segments.gz"))
+            for line in gzip.open(path, "rt").read().splitlines()
+        ]
+        write_elements(batch_pairs(assign(list(inter_commands), lambda n: interleaved[n]), ["Qa"], 100), root / "b")
+        differs = payload_digests(root / "s") != payload_digests(root / "b")
+    check("interleaved targets: no line is lost", len(written), 3)
+    check("  rule 1 holds -- one query, so it is contiguous", {ln.split("\t")[3] for ln in written}, {"Qa"})
+    check("  rule 2 holds -- plus before minus", [ln.split("\t")[6] for ln in written], ["+", "+", "-"])
+    check("  and both targets are present", sorted({ln.split("\t")[0] for ln in written}), ["T1", "T2"])
+    # The gap itself, pinned: this is the case the byte comparison above cannot make.
+    check("  the oracle orders targets differently, which is why byte equality is NOT asserted", differs, True)
+
     # The batch writer honours its compresslevel, pinned on the BYTES like the pair-file checks
     # above: nothing else asserted what level a batch is written at.
     #
@@ -1323,7 +1402,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--max-open",
-        type=int,
+        type=positive_int,
         default=MAX_OPEN_WRITERS,
         help=f"concurrent gzip writers before an LRU eviction (default {MAX_OPEN_WRITERS})",
     )
