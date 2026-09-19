@@ -18,8 +18,19 @@ emits one pair file per element instead of tarring all the splits into `data_pac
 
 A pair file holds exactly ONE query sequence, so the first rule is trivially satisfied. The second is
 why plus splits are written before minus. The third is why target order inside a pair file is free --
-and why the 35-of-5177 splits that span more than one target chromosome can be cut apart by
-target with no sorting: their target names arrive in contiguous runs.
+and why the 35-of-5177 splits that span more than one target chromosome can be cut apart by target
+with no sorting.
+
+⚠ CONTIGUITY IS NOT UNIVERSAL, AND THIS DOCSTRING CLAIMED IT WAS. Measured over all 35: target
+names arrive in contiguous runs in 33 of them. The two exceptions --
+`tmp46.block0.r454826725.{plus,minus}.segments`, the only 2 of 5,177 files with no `.splitN` suffix,
+i.e. the diagonal partition's unsplit remainder -- interleave FOUR target names across 22,464 and
+22,445 runs rather than four blocks.
+
+Correctness does not depend on contiguity and never did: `split_by_target` compares each line to the
+previous one, so an interleaved file yields one run per line and every line still routes to the
+right writer. What was wrong is the stated reason, which is the more dangerous half -- a reader who
+believed it would think a cheaper grouping was safe.
 
 ⚠ MEASURED, NOT ASSUMED. Over all 5,177 splits of a real bundle: 0 span more than one QUERY
 sequence, 0 have a query name recurring after another, 35 span more than one TARGET. An earlier
@@ -105,9 +116,15 @@ def strand_of(command_args: list[str]) -> str:
 def split_by_target(lines: list[str]) -> list[tuple[str, list[str]]]:
     """Cut a segment file into contiguous runs sharing a target name.
 
-    Returns [(target, lines), ...] preserving input order. For the 5,142 splits that hold a
-    single target this is one run; for the 35 that hold two or three it is that many, and no
-    sorting is needed because the runs are already contiguous.
+    Returns [(target, lines), ...] preserving input order. For the 5,142 splits that hold a single
+    target this is one run. For the other 35 it is one run per CONTIGUOUS BLOCK, which is not the
+    same as one run per target name.
+
+    ⚠ MEASURED OVER ALL 35, because the earlier wording ("two or three") was a quantifier asserted
+    over a population and checked on the ones looked at: 23 hold two target names, 8 hold three and
+    **4 hold four**. In 33 the names arrive contiguously, so runs == names; in the remaining 2 they
+    interleave, and those yield ~22,450 single-line runs apiece. Comparing against the previous line
+    is what makes both cases correct without a sort.
     """
     runs: list[tuple[str, list[str]]] = []
     for line in lines:
@@ -324,6 +341,35 @@ def payload_digests(out_dir: pathlib.Path) -> dict[str, tuple[str, int]]:
                 lines += 1
         digests[path.name[: -len(".segments.gz")]] = (digest.hexdigest(), lines)
     return digests
+
+
+def coverage_complaint(splits_seen: int, splits_present: int, bounded: bool) -> str | None:
+    """Why `--compare`'s verdict does not cover the input, or `None` when it does.
+
+    ⛔ WHY A GATE THAT PROVES AGREEMENT IS NOT ENOUGH. Both implementations read the SAME command
+    list, so a truncated list makes them agree on the truncation. Measured: restricting the
+    directory glob to `*.plus.*` drops 2,593 of 5,177 real splits -- half the bundle -- and the
+    comparison passes, as does the self-test. Equivalence and coverage are different properties and
+    only one of them was being checked.
+
+    `bounded` is the caller saying it truncated ON PURPOSE (`--max-splits`), which is legitimate --
+    the buffered reference implementation cannot survive a whole bundle, which is the entire reason
+    the streaming one exists. An UNBOUNDED run that still misses splits is the failure.
+    """
+    if splits_seen == splits_present:
+        return None
+    missing = splits_present - splits_seen
+    if bounded:
+        return (
+            f"bounded by --max-splits: {splits_seen} of {splits_present} split(s) compared, "
+            f"{missing} not covered by this verdict"
+        )
+    return (
+        f"COVERAGE: {splits_seen} of {splits_present} split(s) reached the comparison and "
+        f"{missing} did not, with no --max-splits to explain it. Both implementations read the "
+        f"same list, so they agree on whatever it omits -- this verdict does not cover the "
+        f"input it was pointed at."
+    )
 
 
 def compare_implementations(
@@ -646,6 +692,29 @@ def self_test() -> int:
         )
         check("eviction to multi-member gzip preserves the payload", (ok_lru, complaints_lru), (True, []))
 
+    # ⛔ COVERAGE, THE HOLE THE FIRST VERSION OF THIS GATE HAD. Restricting the input glob to
+    # `*.plus.*` drops 2,593 of 5,177 real splits and BOTH implementations agree on the remainder,
+    # so `--compare` passed and so did this self-test. Agreement and coverage are separate
+    # properties; these assert the second one is now checked and can fail.
+    check("full coverage is silent", coverage_complaint(5177, 5177, False), None)
+    check(
+        "a bounded run says what it did not cover",
+        "bounded by --max-splits" in (coverage_complaint(400, 5177, True) or ""),
+        True,
+    )
+    check(
+        "an UNBOUNDED shortfall is a COVERAGE failure",
+        (coverage_complaint(2584, 5177, False) or "").startswith("COVERAGE:"),
+        True,
+    )
+    # ▶ and the two must not be confused: the same shortfall is a warning when asked for and a
+    # failure when not, which is the whole distinction `--max-splits` encodes.
+    check(
+        "the same shortfall reads differently bounded vs not",
+        coverage_complaint(2584, 5177, True) != coverage_complaint(2584, 5177, False),
+        True,
+    )
+
     # ⛔ AND THE GATE MUST BE ABLE TO FAIL. A comparison that cannot detect a planted difference
     # would pass forever and license anything. Break the ordering rule in a copy of the streaming
     # output and assert the digests diverge.
@@ -728,7 +797,12 @@ def main() -> int:
         # run over an input small enough for that one to survive -- which is the whole reason the
         # streaming one exists. Equivalence is established where both fit and then relied on.
         chosen = commands[: args.max_splits] if args.max_splits else commands
-        print(f"comparing both implementations over {len(chosen)} split(s)")
+        # ⛔ COVERAGE IS CHECKED AGAINST THE DIRECTORY, NOT AGAINST `commands`. Deriving both from
+        # the same glob would make the check agree with whatever the glob omitted -- which is the
+        # exact defect it exists to catch.
+        present = len(list(seg_dir.glob("*.segments")))
+        shortfall = coverage_complaint(len(chosen), present, bool(args.max_splits))
+        print(f"comparing both implementations over {len(chosen)} of {present} split(s)")
         with tempfile.TemporaryDirectory(dir=args.tmpdir) as tmp:
             ok, complaints = compare_implementations(
                 chosen, read_segments, pathlib.Path(tmp), args.compresslevel, args.max_open
@@ -736,7 +810,11 @@ def main() -> int:
         for complaint in complaints:
             print(f"  ⛔ {complaint}")
         print("pair files agree" if ok else f"{len(complaints)} disagreement(s)")
-        return 0 if ok else 1
+        if shortfall:
+            print(f"  {'⚠' if args.max_splits else '⛔'} {shortfall}")
+        # An unbounded run that did not reach every split fails even when the two agree: agreement
+        # over part of the input is not the claim `--compare` is asked for.
+        return 0 if ok and not (shortfall and not args.max_splits) else 1
 
     manifest = stream_pairs(commands, read_segments, pathlib.Path(args.out), args.compresslevel, args.max_open)
     total_lines = sum(n for _, n, _ in manifest)
