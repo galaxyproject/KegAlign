@@ -1,4 +1,4 @@
-#define VERSION "v0.3.2"
+#define VERSION "v0.3.3"
 
 // Upper bound on a seed pattern's weight (its count of match positions).
 //
