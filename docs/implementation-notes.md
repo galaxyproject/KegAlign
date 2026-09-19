@@ -664,6 +664,21 @@ chromosome pair, both strands, which Galaxy maps LASTZ over as a collection. It 
 manifest -- target, query and strand are columns 1, 4 and 7 of the segment lines -- so it does not
 duplicate the `bashlex` parsing `package_output.py` does, and does not depend on it having run.
 
+⛔ **It STREAMS, and v0.3.2 did not.** The first implementation held every segment line of the
+whole bundle in one dict and then joined each pair's lines into another full copy: measured peak
+RSS = 52.4 MB + 1.96 x (input MB), a tight fit over 124-2160 MB, which extrapolates to ~28 GB for
+a 14.15 GB bundle. It was OOM-killed on a 15 GB machine. `stream_pairs` makes one pass per strand
+and appends straight into one gzip writer per pair, so memory is O(number of pair files) -- tens of
+MB -- at the cost of reading the input twice. ⚠ **v0.3.2's container ships the buffered version**;
+the Galaxy tool calls this script with `--segments-dir`, which is exactly the path that OOMs, so
+0.3.3 is the first release in which the collection output is usable on a real genome pair.
+
+`--batch-lines N` packs whole query sequences into one file so the element count stops scaling with
+the query's sequence count, which is what makes a contig-level assembly tractable: a
+300,000-contig query would otherwise emit a Galaxy element per contig per target chromosome. A
+batch is named for its FIRST QUERY rather than its position, because positional names shift
+wholesale when one query is added earlier and then mean different things between two runs.
+
 `runner.py` is the conductor. Three `multiprocessing.Manager()` queues carry work between the stages, and each stage ends when it reads as many `SENTINEL_VALUE`s as there are workers — so the sentinel count and the worker count must agree, and both come from `--num_cpu`.
 
 The queues are **manager proxies**, not `queue.Queue` objects, which is why they can cross a `ProcessPoolExecutor` boundary at all. Anything that changes how workers are spawned has to keep that true.
