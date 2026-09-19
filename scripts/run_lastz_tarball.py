@@ -17,11 +17,15 @@ import tempfile
 import time
 import typing
 
+#: gzip level for this script's compressed output. See package_output.py for the measurement:
+#: level 1 is ~6x the throughput of level 6 for about +24% bytes, and this write is serial.
+COMPRESSLEVEL: typing.Final = 1
+
 
 @contextlib.contextmanager
 def open_file(filename: str) -> typing.Iterator[typing.IO[str]]:
     if filename.endswith(".gz"):
-        with gzip.open(filename, "wt", compresslevel=6) as f:
+        with gzip.open(filename, "wt", compresslevel=COMPRESSLEVEL) as f:
             yield f
     else:
         with open(filename, "w") as f:

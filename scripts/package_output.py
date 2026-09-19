@@ -12,6 +12,15 @@ import typing
 
 import bashlex
 
+#: gzip level for every compressed stream this script writes.
+#
+# ⚠ LEVEL 1, DELIBERATELY -- do not "fix" it back to the default 6. Measured on real Cannabis
+# intermediates: level 6 writes at 22-26 MB/s, level 1 at 141-151 MB/s, for about +24% bytes.
+# This tarball IS the collapse, measured at ~62% of a batched_lastz job's wall clock (twice, on
+# inputs differing 9x), and it is single-threaded gzip of ~14.6 GB. Object store is not the
+# constraint; the serial write is.
+COMPRESSLEVEL: typing.Final = 1
+
 RUSAGE_ATTRS: typing.Final = [
     "ru_utime",
     "ru_stime",
@@ -50,7 +59,7 @@ class PackageFile:
                 name=self.pathname,
                 mode="w:gz",
                 format=tarfile.GNU_FORMAT,
-                compresslevel=6,
+                compresslevel=COMPRESSLEVEL,
             )
 
     def add_config(self, pathname: str) -> None:
