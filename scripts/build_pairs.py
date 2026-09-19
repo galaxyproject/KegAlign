@@ -57,6 +57,19 @@ PAIR_SEP = "__"
 
 SEGMENT_COLUMNS = 8
 
+#: gzip level for the pair files.
+#:
+#: ⚠ LEVEL 1, DELIBERATELY. Measured on real Cannabis intermediates: level 6 writes at 22-26 MB/s,
+#: level 1 at 141-151 MB/s, for about +24% bytes. This write is serial and sits inside the KegAlign
+#: job, so the ~6x throughput is job wall clock; the bytes are object store, which is not the
+#: constraint.
+#:
+#: ▶ IT MOVES A PUBLISHED FIGURE. At level 6 the whole 4.10 GB bundle came to 3.74 GB of pair files,
+#: 4.16 GB with the two 2bits -- a 1.5% wash against the tarball. At level 1 expect ~4.6 GB of pair
+#: files, ~5.0 GB with the 2bits: about 22% more object store than the tarball it replaces, still
+#: against a tarball that must then be inflated whole into a job directory.
+COMPRESSLEVEL = 1
+
 
 class PairKey(typing.NamedTuple):
     target: str
@@ -171,7 +184,7 @@ def pair_lines(strands: dict[str, list[str]]) -> list[str]:
 
 
 def write_pairs(
-    pair_files: dict[PairKey, dict[str, list[str]]], out_dir: pathlib.Path, compresslevel: int = 6
+    pair_files: dict[PairKey, dict[str, list[str]]], out_dir: pathlib.Path, compresslevel: int = COMPRESSLEVEL
 ) -> list[tuple[str, int, int]]:
     """⚠ THE BUFFERED REFERENCE IMPLEMENTATION. `stream_pairs` is what runs; see its docstring.
 
@@ -222,7 +235,7 @@ def stream_pairs(
     commands: list[dict[str, typing.Any]],
     read_segments: typing.Callable[[str], list[str]],
     out_dir: pathlib.Path,
-    compresslevel: int = 6,
+    compresslevel: int = COMPRESSLEVEL,
     max_open: int = MAX_OPEN_WRITERS,
 ) -> list[tuple[str, int, int]]:
     """Group splits into pair files WITHOUT holding the bundle in memory.
@@ -330,7 +343,7 @@ def compare_implementations(
     commands: list[dict[str, typing.Any]],
     read_segments: typing.Callable[[str], list[str]],
     tmp: pathlib.Path,
-    compresslevel: int = 6,
+    compresslevel: int = COMPRESSLEVEL,
     max_open: int = MAX_OPEN_WRITERS,
 ) -> tuple[bool, list[str]]:
     """THE GATE. Run both implementations over one input and report every disagreement.
@@ -661,6 +674,19 @@ def self_test() -> int:
             True,
         )
 
+    # ⛔ THE GZIP LEVEL, ASSERTED ON THE BYTES. Checking `COMPRESSLEVEL == 1` would only restate
+    # the constant; what matters is that the level reaches the deflate call in BOTH writers. The
+    # gzip header's XFL byte (offset 8) records it: CPython writes 4 for level 1, 2 for level 9
+    # and 0 for everything between, so this distinguishes 1 from the default 6 that it keeps
+    # getting "corrected" back to. See COMPRESSLEVEL for why the level is 1.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        stream_pairs(mixed_commands, lambda n: splits[n], root / "streamed")
+        write_pairs(assign(mixed_commands, lambda n: splits[n]), root / "buffered")
+        for impl in ("streamed", "buffered"):
+            xfl = sorted({path.read_bytes()[8] for path in (root / impl).glob("*.segments.gz")})
+            check(f"{impl} pair files carry the fastest-deflate XFL byte", xfl, [4])
+
     if failures:
         print(f"\n{len(failures)} test(s) failed")
         return 1
@@ -675,7 +701,7 @@ def main() -> int:
     )
     parser.add_argument("--segments-dir", default=".", help="directory holding the .segments files")
     parser.add_argument("--out", default="pairs", help="directory to write pair files into")
-    parser.add_argument("--compresslevel", type=int, default=6)
+    parser.add_argument("--compresslevel", type=int, default=COMPRESSLEVEL)
     parser.add_argument("--verify", action="store_true", help="compare a pair file against its splits with real lastz")
     parser.add_argument("--bundle", help="extracted bundle, for --verify")
     parser.add_argument("--pair", help="TARGET,QUERY to verify, e.g. EH23a.chr9,EH23b.chrX")
