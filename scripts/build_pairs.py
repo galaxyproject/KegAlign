@@ -23,6 +23,10 @@ why plus splits are written before minus. The third is why target order inside a
 and why the 35-of-5177 splits that span more than one target chromosome can be cut apart by target
 with no sorting.
 
+⚠ THAT IS A PROPERTY OF THE OUTPUT FILE, NOT OF THE INPUT SPLIT. A split may hold several
+`(target, query)` pairs -- diagonal_partition.py aggregates the small ones on purpose -- so the
+router keys on both fields, per line. See `split_by_pair`.
+
 ⚠ CONTIGUITY IS NOT UNIVERSAL, AND THIS DOCSTRING CLAIMED IT WAS. Measured over all 35: target
 names arrive in contiguous runs in 33 of them. The two exceptions --
 `tmp46.block0.r454826725.{plus,minus}.segments`, the only 2 of 5,177 files with no `.splitN` suffix,
@@ -182,23 +186,46 @@ def split_by_target(lines: list[str]) -> list[tuple[str, list[str]]]:
     return runs
 
 
-def query_of(lines: list[str]) -> str:
-    """The single query name in a segment file.
+def split_by_pair(lines: list[str]) -> list[tuple[PairKey, list[str]]]:
+    """Cut a segment file into contiguous runs sharing a (target, query) pair.
 
-    ⛔ Raises if there is more than one, and that is about the INPUT split, not the output file.
-    KegAlign emits one query per split (measured: 0 of 5,177 span two), so a split that holds more
-    is a malformed bundle rather than a case to accommodate -- there is no evidence about what
-    order its lines would be in, and inventing one is how a silent wrong answer starts.
+    ⛔ THE QUERY IS READ PER LINE, LIKE THE TARGET, AND IT USED NOT TO BE. This function replaces a
+    `query_of(lines)` that took ONE query for the whole split and raised if it found two, on the
+    stated ground that "a multi-query SPLIT is still a bug upstream (measured: 0 of 5,177 span
+    two)". ⚠ THAT CLAIM WAS WRONG, AND diagonal_partition.py SAYS SO ITSELF: pairs whose segment
+    count is under `chunk_size` are deliberately NOT given their own split -- "It is better to keep
+    these pairs in a single segment file" -- and are then AGGREGATED, several `(target, query)`
+    pairs to a file, until they fill a chunk. It even builds `query_key_order` for that case,
+    commenting "This sorting can violate lastz query key order requirement, this is fixed later".
+    Machinery that exists only because a split legitimately carries several queries.
 
-    ⚠ THIS IS NO LONGER WHAT LIMITS A PAIR FILE TO ONE QUERY. It used to be: the reason given here
-    was that repairing the order "would need a sort against the 2bit's sequence order, which this
-    script does not have". It does now -- `read_2bit_order` -- and `batch_pairs` uses it to put
-    many queries in one file. This check stays because a multi-query SPLIT is still a bug upstream.
+    ⚠ THE 0-of-5,177 MEASUREMENT WAS TRUE AND UNREPRESENTATIVE. `skip_pairs` is gated on
+    `len(data.keys()) > 1`, so a single-pair run can never produce an aggregate; a run whose pairs
+    all exceed `chunk_size` produces none either. Measured on EH23a x EH23b 2026-09-23 (79,584,367
+    HSPs) a split arrived holding `EH23b.chr2` and `EH23b.chr5` -- non-adjacent because they are
+    two SMALL pairs sorted into the leftovers bucket, not neighbours.
+
+    ▶ Routing per line needs no order to be invented, which was the real worry: each line goes to
+    its own bucket and relative order within a bucket is preserved, exactly as for the target. The
+    lastz rules quoted at the top of this module are satisfied where they apply -- to the OUTPUT
+    pair file, which still holds one pair.
     """
-    names = {line.split("\t")[3] for line in lines}
-    if len(names) != 1:
-        raise ValueError(f"split spans {len(names)} query sequences: {sorted(names)}")
-    return names.pop()
+    runs: list[tuple[PairKey, list[str]]] = []
+    for line in lines:
+        fields = line.split("\t")
+        if len(fields) < SEGMENT_COLUMNS - 1:
+            raise ValueError(f"segment line has {len(fields)} fields: {line!r}")
+        key = PairKey(fields[0], fields[3])
+        if runs and runs[-1][0] == key:
+            runs[-1][1].append(line)
+        else:
+            runs.append((key, [line]))
+    return runs
+
+
+def queries_of(lines: list[str]) -> list[str]:
+    """Every query in a segment file, in first-appearance order."""
+    return list(dict.fromkeys(line.split("\t")[3] for line in lines))
 
 
 def read_2bit_order(path: pathlib.Path) -> list[str]:
@@ -344,15 +371,14 @@ def assign(
         lines = read_segments(segments)
         if not lines:
             continue
-        query = query_of(lines)
         strand = strand_of(command["args"])
-        for target, run in split_by_target(lines):
+        for key, run in split_by_pair(lines):
             if strand == "both":
                 # the file itself carries strand per line; trust it rather than the flag
                 for line in run:
-                    pair_files[PairKey(target, query)][line.split("\t")[6]].append(line)
+                    pair_files[key][line.split("\t")[6]].append(line)
             else:
-                pair_files[PairKey(target, query)][strand].extend(run)
+                pair_files[key][strand].extend(run)
     return pair_files
 
 
@@ -496,10 +522,8 @@ def stream_pairs(
                 lines = read_segments(segments)
                 if not lines:
                     continue
-                query = query_of(lines)
                 strand_of_line = _line_strand(args)
-                for target, run in split_by_target(lines):
-                    key = PairKey(target, query)
+                for key, run in split_by_pair(lines):
                     for line in run:
                         if strand_of_line(line) != wanted:
                             continue
@@ -558,10 +582,15 @@ def stream_batches(
         lines = read_segments(segments)
         if not lines:
             continue
-        # ⚠ `query_of` raises on a split spanning two queries. Measured over all 5,177 splits of a
-        # real bundle: none do. It is a bug upstream if one ever does, not a case to handle here.
-        by_query[query_of(lines)].append(command)
-        query_lines[query_of(lines)] += len(lines)
+        # ⚠ A SPLIT MAY CARRY SEVERAL QUERIES -- diagonal_partition.py aggregates small pairs into
+        # one file on purpose -- so a command is registered against EVERY query it contributes to,
+        # and the line counts are per query rather than per file. Counting the whole file against
+        # one query would size the batches from the wrong numbers even when the routing below is
+        # right, which is the quieter half of the same bug.
+        counts = collections.Counter(line.split("\t")[3] for line in lines)
+        for name, n in counts.items():
+            by_query[name].append(command)
+            query_lines[name] += n
 
     manifest: list[tuple[str, int, int]] = []
     for identifier, names in batch_plan(query_order, query_lines, max_lines):
@@ -578,6 +607,11 @@ def stream_batches(
                             continue  # nothing of this command belongs to this pass
                         strand_of_line = _line_strand(args)
                         for line in read_segments(require_arg(args, "--segments=")):
+                            # ⛔ THE SPLIT MAY HOLD OTHER QUERIES TOO. Writing every line of a
+                            # registered command would file another query's segments under this
+                            # batch -- silently, since the bytes are still valid lastz input.
+                            if line.split("\t")[3] != name:
+                                continue
                             if strand_of_line(line) != wanted:
                                 continue
                             handle.write(line.encode())
@@ -1017,12 +1051,26 @@ def self_test() -> int:
     check("multi-target split cuts into contiguous runs", [t for t, _ in split_by_target(multi)], ["T1", "T2", "T3"])
     check("cutting loses no lines", sum(len(r) for _, r in split_by_target(multi)), len(multi))
 
-    check("query_of finds the single query", query_of(single), "Q1")
-    try:
-        query_of([*single, seg("T1", "Q2", "+", 9)])
-        check("two queries must raise", "no raise", "ValueError")
-    except ValueError:
-        check("two queries must raise", "ValueError", "ValueError")
+    check("single-pair split is one run", [k for k, _ in split_by_pair(single)], [PairKey("T1", "Q1")])
+    check("queries_of finds the single query", queries_of(single), ["Q1"])
+
+    # ⛔ THE AGGREGATED LEFTOVERS BUCKET. diagonal_partition.py packs several small (target, query)
+    # pairs into one split, so this is a REAL input shape, not a malformed one. It used to raise.
+    mixed = [seg("T1", "Q1", "+", 0), seg("T1", "Q2", "+", 1), seg("T2", "Q1", "+", 2)]
+    check("a split may hold several queries", queries_of(mixed), ["Q1", "Q2"])
+    check(
+        "  and each line routes to its own (target, query)",
+        [k for k, _ in split_by_pair(mixed)],
+        [PairKey("T1", "Q1"), PairKey("T1", "Q2"), PairKey("T2", "Q1")],
+    )
+    check("  losing no lines", sum(len(r) for _, r in split_by_pair(mixed)), len(mixed))
+    # ⚠ interleaved, not merely adjacent -- the same property split_by_target relies on
+    inter = [seg("T1", "Q1", "+", 0), seg("T1", "Q2", "+", 1), seg("T1", "Q1", "+", 2)]
+    check(
+        "  an INTERLEAVED split still routes every line",
+        sorted((k.target, k.query, len(r)) for k, r in split_by_pair(inter)),
+        [("T1", "Q1", 1), ("T1", "Q1", 1), ("T1", "Q2", 1)],
+    )
 
     check("--strand=minus reads as '-'", strand_of(["--strand=minus"]), "-")
     check("absent --strand means both", strand_of(["--ydrop=1"]), "both")
@@ -1069,9 +1117,9 @@ def self_test() -> int:
     # QUERY-FILE order, whatever order the pair files were keyed in. `assign` keys them
     # alphabetically, so an order that is deliberately NOT alphabetical is the only honest fixture.
     #
-    # ⚠ ONE SPLIT STILL HOLDS ONE QUERY, and `query_of` still refuses otherwise. That invariant is
-    # about KegAlign's INPUT splits (measured: 0 of 5,177 span two queries) and is untouched. What
-    # batching relaxes is the OUTPUT file, which the manual never restricted to one query.
+    # ⚠ A SPLIT MAY HOLD SEVERAL QUERIES -- see `split_by_pair`. What batching relaxes is the
+    # OUTPUT file, which the manual never restricted to one query; what the router handles is the
+    # INPUT split, which diagonal_partition.py aggregates on purpose.
     order = ["Qc", "Qa", "Qb"]
     splits = {
         "a": [seg("T1", "Qa", "+", 1), seg("T1", "Qa", "-", 2)],
@@ -1092,6 +1140,28 @@ def self_test() -> int:
         ["+", "-"],
     )
     check("  and a batch may span several targets", sorted({ln.split("\t")[0] for ln in one[0][1]}), ["T1", "T2"])
+
+    # ⛔ THE AGGREGATED SPLIT, THROUGH BATCHING. One file carrying Qa AND Qb is what
+    # diagonal_partition.py's leftovers bucket produces, and it is what used to raise. The batch
+    # must still emit each query's lines under that query, in query-file order -- writing the whole
+    # file under whichever query was seen first is valid lastz input and silently wrong.
+    agg = {
+        "ab": [seg("T1", "Qa", "+", 1), seg("T2", "Qb", "+", 3), seg("T1", "Qa", "-", 2)],
+        "c": [seg("T1", "Qc", "+", 4)],
+    }
+    keyed_agg = assign([{"args": [f"--segments={n}"]} for n in ("ab", "c")], lambda n: agg[n])
+    mixed_one = batch_pairs(keyed_agg, order, max_lines=100)
+    check("an aggregated split batches without raising", len(mixed_one), 1)
+    check(
+        "  each query keeps its own lines, in query-file order",
+        [ln.split("\t")[3] for ln in mixed_one[0][1]],
+        ["Qc", "Qa", "Qa", "Qb"],
+    )
+    check(
+        "  and plus still precedes minus within the aggregated query",
+        [ln.split("\t")[6] for ln in mixed_one[0][1] if ln.split("\t")[3] == "Qa"],
+        ["+", "-"],
+    )
 
     # a batch boundary never falls inside a query: Qa owns two lines and they stay together
     split = batch_pairs(keyed, order, max_lines=2)
